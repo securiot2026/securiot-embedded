@@ -1,8 +1,13 @@
 #ifndef WIFI_MANAGER_H
 #define WIFI_MANAGER_H
 
-// Blocking initial WiFi connect. Loops with a timeout and retries until
-// connected, meant to be called once from setup().
+// Blocking initial WiFi connect. Reads stored credentials from Preferences
+// via provisioning.h; if none exist (or 3 consecutive 20s connect attempts
+// against stored credentials fail), starts the captive portal via
+// provisioningBegin() and blocks until the operator provisions the device
+// (which restarts it) or, on the defensive fallback path, until
+// provisioningLoadConfig() reports a valid config. Meant to be called once
+// from setup().
 void wifiConnect();
 
 // Non-blocking connectivity check, call at the top of every loop() iteration.
