@@ -63,6 +63,25 @@ void indicateWifiConnected() {
     setPixelColor(0, 255, 0);
 }
 
+void indicatePortalActive() {
+    // Non-blocking pulsing blue (0-1500ms rising, 1500-3000ms falling, no
+    // delay()): this function is called every loop() iteration while the
+    // portal is active, a blocking delay() here would stall
+    // espConnect.loop() and the non-blocking portal. Distinct from
+    // indicateWifiConnecting()'s solid blue.
+    const unsigned long kPeriodMs = 3000;
+    const uint8_t kMinBrightness = 20;
+    const uint8_t kMaxBrightness = 100;
+
+    unsigned long phase = millis() % kPeriodMs;
+    unsigned long halfPeriod = kPeriodMs / 2;
+    unsigned long triangle = (phase < halfPeriod) ? phase : (kPeriodMs - phase);
+    uint8_t brightness = kMinBrightness +
+                          (uint8_t)((triangle * (kMaxBrightness - kMinBrightness)) / halfPeriod);
+
+    setPixelColor(0, 0, brightness);
+}
+
 void indicateFatalError() {
     while (true) {
         setPixelColor(255, 0, 0);

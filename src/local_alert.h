@@ -26,6 +26,13 @@ void indicateWifiConnecting();
 // by clearLocalAlert().
 void indicateWifiConnected();
 
+// Status LED pulsing blue: captive portal active (AP/portal phase, or
+// STA-connected-but-awaiting-/provision-extra phase). Distinct from the
+// solid blue of indicateWifiConnecting(). Non-blocking (no delay()) — call
+// every loop() iteration while provisioningActive() is true. Called from
+// provisioning.cpp.
+void indicatePortalActive();
+
 // Status LED blinks red forever and never returns: fatal error (camera
 // init failed). Called once from main.cpp's setup(), replaces the halt
 // loop that used to follow a failed initCamera().
