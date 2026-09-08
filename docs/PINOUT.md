@@ -44,23 +44,28 @@ anything.
 | 15 | Tilt servo | `src/servo_control.cpp` | Strapping pin for JTAG selection, but safe to drive as an output once boot has completed; not loaded externally during boot in this wiring |
 | 14 | Door-lock servo | `src/servo_control.cpp` | Safe general-purpose output |
 | 2 | Buzzer (LEDC tone) | `src/local_alert.cpp` | Strapping pin, must be LOW or floating during boot for normal boot mode; a servo motor or buzzer driver on this pin does not present a conflicting pull at power-on in this wiring, but confirm during Juan's physical bring-up (see docs/BRINGUP.md step 4) |
-| 4 | Local alert LED | `src/local_alert.cpp` | Reuses the AI-Thinker board's onboard flash LED instead of wiring a separate external LED, see "Onboard flash LED reuse" below |
+| 4 | Status/alert RGB LED (WS2812, data pin) | `src/local_alert.cpp` | Same pin as the board's onboard flash LED, but driven as an external WS2812 data line instead: color-coded status (blue = WiFi connecting, green = idle/connected, red = alert or fatal error) instead of a plain white flash. See "Status LED (WS2812)" below |
 
 GPIO 12 is deliberately left unused by this project because of its flash
 voltage-selection strapping role documented above, there was no need to
 risk it when GPIOs 13/14/15/2/4 already cover all five peripherals.
 
-## Onboard flash LED reuse (GPIO4)
+## Status LED (WS2812) on GPIO4
 
 The AI-Thinker ESP32-CAM has a bright white LED soldered next to the camera
-on GPIO4, normally used as a photography flash. This project reuses it as
-the local-alert LED (`triggerLocalAlert()` in `src/local_alert.cpp`) instead
-of wiring a separate external LED, because:
+on GPIO4, normally used as a photography flash. This project does not use
+that onboard LED: GPIO4 instead drives an external single WS2812/NeoPixel
+RGB LED (`Adafruit_NeoPixel`, `src/local_alert.cpp`), wired per
+`docs/WIRING.md`. Same pin, same zero extra GPIO cost as reusing the
+onboard LED would have been, but color-coded status instead of a plain
+white flash:
 
-- It needs no extra wiring or GPIO, freeing a pin for other use if the
-  project grows.
-- It is bright enough to be seen from the same distance a person would be
-  detected from, satisfying HW-05's local visual alert requirement.
+| Color | Meaning | Set from |
+|---|---|---|
+| Blue | WiFi connecting or reconnecting | `wifi_manager.cpp` |
+| Green | WiFi connected, idle (no active alert) | `wifi_manager.cpp`, `local_alert.cpp` |
+| Red (steady) | Confirmed detection / active alert | `local_alert.cpp` |
+| Red (blinking, forever) | Fatal error (camera init failed) | `main.cpp` |
 
 Tradeoff: it sits right next to the camera lens, so during the physical
 bring-up in `docs/BRINGUP.md`, verify the alert LED does not wash out the

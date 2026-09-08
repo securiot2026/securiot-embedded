@@ -3,7 +3,7 @@
 Firmware for the SecurIoT ESP32-CAM (AI-Thinker) device. Captures frames,
 sends them to the Edge API's `POST /frames` endpoint, and acts on the
 response: pans/tilts the camera to track a detected person, actuates a
-door-lock servo, and fires a local buzzer/LED alert.
+door-lock servo, and fires a local buzzer/status-LED alert.
 
 ## What this device does
 
@@ -12,9 +12,12 @@ door-lock servo, and fires a local buzzer/LED alert.
    with the `X-Device-Key` header and `device_id`/`zone_id` fields.
 3. Parses the JSON response (`pan_delta`, `tilt_delta`, `door_action`,
    `alert`) and drives the pan/tilt servos, the door-lock servo, and the
-   local buzzer/LED accordingly.
+   local buzzer/status LED accordingly.
 4. Reconnects to WiFi automatically if the connection drops, without a
    manual power-cycle.
+5. Drives a single WS2812 status LED (GPIO4, see `docs/PINOUT.md`): blue
+   while connecting to WiFi, green when idle/connected, red on a confirmed
+   detection, and red blinking forever if the camera fails to initialize.
 
 The exact request/response contract is documented in the Edge API's own
 README (`repos/securiot-edge-api/README.md`, "Camera detection contract").
@@ -69,7 +72,7 @@ src/main.cpp             setup()/loop(), camera init, capture/POST/parse
 src/camera_pins.h         AI-Thinker ESP32-CAM camera GPIO mapping
 src/wifi_manager.{h,cpp}  WiFi connect + reconnect-with-backoff
 src/servo_control.{h,cpp} Pan/tilt/door-lock servo control
-src/local_alert.{h,cpp}   Buzzer/LED local alert
+src/local_alert.{h,cpp}   Buzzer + WS2812 status LED (blue/green/red states)
 src/edge_discovery.{h,cpp} mDNS lookup of the Edge API, with static fallback
 src/secrets.h.example     Template for WiFi/API credentials (copy to secrets.h)
 docs/PINOUT.md            GPIO reference

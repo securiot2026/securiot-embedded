@@ -76,6 +76,9 @@ this public repository.
 Perform these checks with the device on the external 5V supply, not on USB
 power:
 
+- [ ] Power on and confirm the status LED shows blue (WiFi connecting),
+      then turns green once connected. If it instead blinks red forever,
+      camera init failed, see the Serial Monitor for the error.
 - [ ] Open the Serial Monitor (`pio device monitor`, 115200 baud) and
       confirm the log shows a successful WiFi connect with an IP address.
 - [ ] Confirm the log shows either "mDNS: resolved Edge API at http://..."
@@ -88,8 +91,9 @@ power:
       visibly move to track them.
 - [ ] Confirm the door-lock servo actuates (sweeps to its locked position)
       on a confirmed detection.
-- [ ] Confirm the buzzer sounds and the alert LED (GPIO4, the onboard
-      flash LED, see `docs/PINOUT.md`) lights up on a confirmed detection.
+- [ ] Confirm the buzzer sounds and the status LED (GPIO4, external WS2812,
+      see `docs/PINOUT.md`) switches to red on a confirmed detection, then
+      back to green once the detection clears.
 - [ ] With the device running, turn the WiFi router's radio off, wait about
       30 seconds, then turn it back on. Confirm the device resumes sending
       frames automatically, without a manual power-cycle of the ESP32-CAM.

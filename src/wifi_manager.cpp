@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 
+#include "local_alert.h"
 #include "secrets.h"
 
 namespace {
@@ -18,6 +19,7 @@ unsigned long g_lastReconnectAttemptMs = 0;
 void wifiConnect() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    indicateWifiConnecting();
 
     Serial.print("WiFi: connecting to ");
     Serial.println(WIFI_SSID);
@@ -37,6 +39,7 @@ void wifiConnect() {
     Serial.print("WiFi: connected, IP=");
     Serial.println(WiFi.localIP());
 
+    indicateWifiConnected();
     g_reconnectBackoffMs = kReconnectBackoffMinMs;
 }
 
@@ -45,6 +48,8 @@ bool wifiEnsureConnected() {
         g_reconnectBackoffMs = kReconnectBackoffMinMs;
         return true;
     }
+
+    indicateWifiConnecting();
 
     unsigned long now = millis();
     if (now - g_lastReconnectAttemptMs < g_reconnectBackoffMs) {
@@ -59,5 +64,9 @@ bool wifiEnsureConnected() {
 
     g_reconnectBackoffMs = min(g_reconnectBackoffMs * 2, kReconnectBackoffMaxMs);
 
-    return WiFi.status() == WL_CONNECTED;
+    bool connected = WiFi.status() == WL_CONNECTED;
+    if (connected) {
+        indicateWifiConnected();
+    }
+    return connected;
 }

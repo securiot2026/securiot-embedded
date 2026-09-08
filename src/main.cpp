@@ -221,15 +221,14 @@ void setup() {
     Serial.println();
     Serial.println("SecurIoT ESP32-CAM firmware starting");
 
-    if (!initCamera()) {
-        Serial.println("FATAL: camera init failed, halting");
-        while (true) {
-            delay(1000);
-        }
-    }
-
     servosInit();
     alertInit();
+
+    if (!initCamera()) {
+        Serial.println("FATAL: camera init failed, halting");
+        indicateFatalError(); // blinks red forever, never returns
+    }
+
     wifiConnect();
 
     g_edgeApiBaseUrl = resolveEdgeApiBaseUrl();
