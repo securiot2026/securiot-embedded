@@ -5,8 +5,8 @@
 #include <esp_camera.h>
 
 #include "camera_pins.h"
-#include "edge_discovery.h"
 #include "local_alert.h"
+#include "provisioning.h"
 #include "secrets.h"
 #include "servo_control.h"
 #include "wifi_manager.h"
@@ -26,10 +26,12 @@ namespace {
 
 unsigned long g_lastCaptureMs = 0;
 
-// Edge API base URL for this session, resolved via mDNS with a static
-// fallback, see edge_discovery.h. Re-resolved after a run of consecutive
-// request failures, in case the Edge API's IP changed.
+// Edge API base URL and device key, sourced from Preferences via
+// provisioning.h (portal-managed, see provisioning.cpp) - re-read after a
+// run of consecutive request failures in case the operator re-provisioned
+// the device with a different URL.
 String g_edgeApiBaseUrl;
+String g_deviceKey;
 int g_consecutiveRequestFailures = 0;
 const int kFailuresBeforeReResolve = 3;
 
@@ -146,7 +148,7 @@ void handleFramesResponse(HTTPClient &http) {
 void captureAndSendFrame() {
     if (g_edgeApiBaseUrl.isEmpty()) {
         Serial.println("Edge API base URL not resolved, skipping this cycle");
-        g_edgeApiBaseUrl = resolveEdgeApiBaseUrl();
+        g_edgeApiBaseUrl = provisioningGetEdgeApiUrl();
         return;
     }
 
@@ -180,7 +182,7 @@ void captureAndSendFrame() {
     String url = g_edgeApiBaseUrl + "/frames";
     http.begin(url);
     http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-    http.addHeader("X-Device-Key", DEVICE_KEY);
+    http.addHeader("X-Device-Key", g_deviceKey);
 
     int httpCode = http.POST(body, totalLen);
 
@@ -206,7 +208,7 @@ void captureAndSendFrame() {
         g_consecutiveRequestFailures++;
         if (g_consecutiveRequestFailures >= kFailuresBeforeReResolve) {
             Serial.println("Edge API: too many consecutive failures, re-resolving base URL");
-            g_edgeApiBaseUrl = resolveEdgeApiBaseUrl();
+            g_edgeApiBaseUrl = provisioningGetEdgeApiUrl();
             g_consecutiveRequestFailures = 0;
         }
     }
@@ -231,10 +233,22 @@ void setup() {
 
     wifiConnect();
 
-    g_edgeApiBaseUrl = resolveEdgeApiBaseUrl();
+    g_edgeApiBaseUrl = provisioningGetEdgeApiUrl();
+    // Cached once here (not read from Preferences/NVS on every frame) to
+    // avoid an NVS read on every HTTP request's latency path.
+    g_deviceKey = provisioningGetDeviceKey();
 }
 
 void loop() {
+    // Must run every iteration while the AP/portal or /provision-extra
+    // window is active (RESEARCH.md Pattern 2); a fast no-op otherwise.
+    provisioningLoop();
+    if (provisioningActive()) {
+        // Operator is still configuring the device - no valid WiFi/Edge
+        // connection to use yet, skip the capture/send cycle entirely.
+        return;
+    }
+
     if (!wifiEnsureConnected()) {
         // Not connected yet, backoff is handled inside wifi_manager, do not
         // block here, just skip this cycle and retry on the next loop().
