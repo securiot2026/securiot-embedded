@@ -19,6 +19,28 @@ door-lock servo, and fires a local buzzer/LED alert.
 The exact request/response contract is documented in the Edge API's own
 README (`repos/securiot-edge-api/README.md`, "Camera detection contract").
 
+## Finding the Edge API on the network
+
+The Edge API is meant to run on a machine local to the installation site
+(the ESP32-CAM's own WiFi network), not on the Cloud API's VPS, YOLO
+inference is too heavy for a small VPS and the device needs LAN-level
+latency anyway. See `repos/securiot-edge-api/README.md`, "Where this
+runs", for the full picture.
+
+This firmware finds that machine automatically via mDNS, no IP to
+hardcode or update:
+
+1. At boot, and again after 3 consecutive failed requests (the previously
+   resolved IP likely changed), it queries `EDGE_API_MDNS_HOST` (`secrets.h`,
+   default `"edge-api"`, resolving `edge-api.local`).
+2. If that succeeds, it uses the returned IP with `EDGE_API_PORT`.
+3. If it fails (no mDNS responder reachable, or `EDGE_API_MDNS_HOST` is
+   commented out), it falls back to the static `EDGE_API_URL`.
+
+Setup on the Edge API side (setting the machine's mDNS hostname) is in
+`repos/securiot-edge-api/README.md`, "LAN discovery (mDNS)". Configuring
+this firmware's side of it is in `docs/BRINGUP.md`, step 3.
+
 ## Documentation
 
 - [`docs/PINOUT.md`](docs/PINOUT.md) - full GPIO table, camera-reserved
@@ -45,6 +67,7 @@ src/camera_pins.h         AI-Thinker ESP32-CAM camera GPIO mapping
 src/wifi_manager.{h,cpp}  WiFi connect + reconnect-with-backoff
 src/servo_control.{h,cpp} Pan/tilt/door-lock servo control
 src/local_alert.{h,cpp}   Buzzer/LED local alert
+src/edge_discovery.{h,cpp} mDNS lookup of the Edge API, with static fallback
 src/secrets.h.example     Template for WiFi/API credentials (copy to secrets.h)
 docs/PINOUT.md            GPIO reference
 docs/BRINGUP.md           Manual flashing/configuration/verification checklist

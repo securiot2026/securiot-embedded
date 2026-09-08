@@ -5,6 +5,7 @@
 #include <esp_camera.h>
 
 #include "camera_pins.h"
+#include "edge_discovery.h"
 #include "local_alert.h"
 #include "secrets.h"
 #include "servo_control.h"
@@ -24,6 +25,13 @@
 namespace {
 
 unsigned long g_lastCaptureMs = 0;
+
+// Edge API base URL for this session, resolved via mDNS with a static
+// fallback, see edge_discovery.h. Re-resolved after a run of consecutive
+// request failures, in case the Edge API's IP changed.
+String g_edgeApiBaseUrl;
+int g_consecutiveRequestFailures = 0;
+const int kFailuresBeforeReResolve = 3;
 
 bool initCamera() {
     camera_config_t config = {};
@@ -136,6 +144,12 @@ void handleFramesResponse(HTTPClient &http) {
 }
 
 void captureAndSendFrame() {
+    if (g_edgeApiBaseUrl.isEmpty()) {
+        Serial.println("Edge API base URL not resolved, skipping this cycle");
+        g_edgeApiBaseUrl = resolveEdgeApiBaseUrl();
+        return;
+    }
+
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) {
         Serial.println("Camera capture failed, skipping this cycle");
@@ -163,7 +177,7 @@ void captureAndSendFrame() {
     memcpy(body + offset, tail.c_str(), tail.length());
 
     HTTPClient http;
-    String url = String(EDGE_API_URL) + "/frames";
+    String url = g_edgeApiBaseUrl + "/frames";
     http.begin(url);
     http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     http.addHeader("X-Device-Key", DEVICE_KEY);
@@ -176,11 +190,25 @@ void captureAndSendFrame() {
     free(body);
 
     if (httpCode == HTTP_CODE_OK) {
+        g_consecutiveRequestFailures = 0;
         handleFramesResponse(http);
-    } else if (httpCode > 0) {
-        Serial.printf("Edge API returned HTTP %d\n", httpCode);
     } else {
-        Serial.printf("HTTP POST failed: %s\n", http.errorToString(httpCode).c_str());
+        if (httpCode > 0) {
+            Serial.printf("Edge API returned HTTP %d\n", httpCode);
+        } else {
+            Serial.printf("HTTP POST failed: %s\n", http.errorToString(httpCode).c_str());
+        }
+
+        // A wrong/stale resolved IP (Edge API host restarted with a new
+        // DHCP lease, for example) looks like a run of failures here, not
+        // like a single clean error, so only re-resolve after a few in a
+        // row, not on every single hiccup.
+        g_consecutiveRequestFailures++;
+        if (g_consecutiveRequestFailures >= kFailuresBeforeReResolve) {
+            Serial.println("Edge API: too many consecutive failures, re-resolving base URL");
+            g_edgeApiBaseUrl = resolveEdgeApiBaseUrl();
+            g_consecutiveRequestFailures = 0;
+        }
     }
 
     http.end();
@@ -203,6 +231,8 @@ void setup() {
     servosInit();
     alertInit();
     wifiConnect();
+
+    g_edgeApiBaseUrl = resolveEdgeApiBaseUrl();
 }
 
 void loop() {

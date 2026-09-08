@@ -47,10 +47,19 @@ combination (see `.planning/research/PITFALLS.md` and the phase ROADMAP).
 ## 3. Configuration
 
 1. Copy `src/secrets.h.example` to `src/secrets.h`.
-2. Fill in the real WiFi SSID and password.
-3. Set `EDGE_API_URL` to the Edge API's LAN address and port, wherever
-   `flask --app wsgi run` is bound on your network (for example
-   `http://192.168.1.50:5000`).
+2. Fill in the real WiFi SSID and password. The ESP32-CAM and the machine
+   running the Edge API must be on the same WiFi network.
+3. Edge API address, pick one:
+   - **mDNS (default, recommended)**: leave `EDGE_API_MDNS_HOST` set to
+     `"edge-api"` and set the Edge API host's mDNS hostname to `edge-api`,
+     see `securiot-edge-api/README.md`, "LAN discovery (mDNS)". The
+     firmware finds the machine automatically at boot, no IP to maintain.
+   - **Static IP**: comment out `#define EDGE_API_MDNS_HOST` and set
+     `EDGE_API_URL` to the Edge API's LAN IP and port (for example
+     `http://192.168.1.50:5000`). Use this if mDNS is not available (see
+     the Windows note in the Edge API README) or the network blocks it.
+     `EDGE_API_URL` also works as an automatic fallback if mDNS is enabled
+     but fails to resolve, so it is worth filling in either way.
 4. Set `DEVICE_KEY` to the shared secret configured on the Edge API for
    this device, and set `DEVICE_ID`/`ZONE_ID` to match how this device is
    registered.
@@ -66,6 +75,10 @@ power:
 
 - [ ] Open the Serial Monitor (`pio device monitor`, 115200 baud) and
       confirm the log shows a successful WiFi connect with an IP address.
+- [ ] Confirm the log shows either "mDNS: resolved Edge API at http://..."
+      or, if using the static fallback, "Edge API: using static
+      EDGE_API_URL=...". If it instead shows "mDNS: query timed out",
+      double check the Edge API host's mDNS hostname (see its README).
 - [ ] Confirm the log shows at least one full capture -> POST -> response
       cycle, with `pan_delta`/`tilt_delta`/`door_action`/`alert` printed.
 - [ ] Present a person to the camera and confirm the pan and tilt servos
