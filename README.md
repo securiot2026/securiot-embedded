@@ -45,6 +45,9 @@ this firmware's side of it is in `docs/BRINGUP.md`, step 3.
 
 - [`docs/PINOUT.md`](docs/PINOUT.md) - full GPIO table, camera-reserved
   pins vs. pins used by this project, and why.
+- [`docs/WIRING.md`](docs/WIRING.md) - visual connection diagram: every
+  external component (servos, buzzer, power supply, FTDI programmer), what
+  GPIO/pin it wires to, and the wiring order.
 - [`docs/BRINGUP.md`](docs/BRINGUP.md) - manual checklist for flashing,
   configuring, and physically verifying the device.
 
@@ -70,5 +73,6 @@ src/local_alert.{h,cpp}   Buzzer/LED local alert
 src/edge_discovery.{h,cpp} mDNS lookup of the Edge API, with static fallback
 src/secrets.h.example     Template for WiFi/API credentials (copy to secrets.h)
 docs/PINOUT.md            GPIO reference
+docs/WIRING.md            Visual connection diagram, every component and pin
 docs/BRINGUP.md           Manual flashing/configuration/verification checklist
 ```

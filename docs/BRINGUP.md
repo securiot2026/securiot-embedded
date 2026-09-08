@@ -9,6 +9,9 @@ Follow the steps in order, do not skip step 1.
 
 ## 1. Power sequencing (do this before anything else)
 
+See [`docs/WIRING.md`](WIRING.md) for the full connection diagram covering
+every step below, GPIO by GPIO.
+
 The camera plus 3 servos can draw enough current, especially during a WiFi
 transmit burst, to brown out a supply that is only backed by a USB-serial
 programmer's 5V line. This is a documented risk for this exact hardware
