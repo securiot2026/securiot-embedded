@@ -5,7 +5,9 @@
 #include <esp_camera.h>
 
 #include "camera_pins.h"
+#include "local_alert.h"
 #include "secrets.h"
+#include "servo_control.h"
 #include "wifi_manager.h"
 
 // Frame size / quality for capture. VGA (640x480) keeps the multipart POST
@@ -120,12 +122,17 @@ void handleFramesResponse(HTTPClient &http) {
     Serial.print(" alert=");
     Serial.println(alert ? "true" : "false");
 
-    // No servo/buzzer actuation yet, this task only proves the
-    // capture -> POST -> parse -> log path end to end.
-    (void)panDelta;
-    (void)tiltDelta;
-    (void)doorAction;
-    (void)alert;
+    if (!isnan(panDelta) && !isnan(tiltDelta)) {
+        applyPanTilt(panDelta, tiltDelta);
+    }
+    if (doorAction && strcmp(doorAction, "lock") == 0) {
+        triggerDoorLock();
+    }
+    if (alert) {
+        triggerLocalAlert();
+    } else {
+        clearLocalAlert();
+    }
 }
 
 void captureAndSendFrame() {
@@ -193,6 +200,8 @@ void setup() {
         }
     }
 
+    servosInit();
+    alertInit();
     wifiConnect();
 }
 
