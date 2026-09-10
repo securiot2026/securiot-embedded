@@ -21,20 +21,42 @@ Preferences prefs;
 const char *kPrefsNamespace = "securiot";
 const unsigned long kEdgeApiPingTimeoutMs = 5000;
 
-// Set true once WiFi connects (STA), false again once /provision-extra
-// has been successfully submitted (config saved) or on a fresh boot
-// before the portal even starts. This is the second half of
+// Set true when MycilaESPConnect validates WiFi credentials
+// (PORTAL_COMPLETE), false again once /provision-extra has been
+// successfully submitted (config saved, device about to restart) or on a
+// fresh boot before the portal even starts. This is the second half of
 // provisioningActive()'s "still provisioning" window, distinct from the
 // AP/portal phase which MycilaESPConnect's own state machine tracks.
-bool g_awaitingExtraForm = false;
+bool g_credentialsValidated = false;
 
-// Holds SSID/password captured from MycilaESPConnect's Config once WiFi
-// connects, until the operator submits /provision-extra and the full
-// 4-field config can be saved together.
+// Set true in the same instant g_credentialsValidated becomes true. Once
+// set, provisioningLoop() stops calling espConnect.loop() for the rest of
+// this boot. This is deliberate: MycilaESPConnect's own loop(), on the
+// very next call after PORTAL_COMPLETE, tears down the SoftAP
+// (WiFi.softAPdisconnect()) to move to a plain STA-only connection - which
+// would kick the operator's phone off SecurIoT-Setup-XXXX before they
+// ever reach /provision-extra. Pausing the library's loop() keeps AP+STA
+// both alive (WiFi is already connected STA-side from the credential
+// test itself - MycilaESPConnect runs AP+STA concurrently while testing),
+// so the phone never has to leave the AP network at all. The
+// AsyncWebServer and DNS server keep serving regardless (both are
+// event-driven / task-backed, not loop()-driven) - see 06-RESEARCH.md
+// (this phase's second research pass) for the traced library source.
+bool g_espConnectLoopPaused = false;
+
+// Holds SSID/password captured from MycilaESPConnect's Config once
+// credentials validate, until the operator submits /provision-extra and
+// the full 4-field config can be saved together.
 String g_capturedSsid;
 String g_capturedPassword;
 
 bool started = false;
+
+// Fixed SoftAP gateway IP MycilaESPConnect configures for every captive
+// portal it starts (WiFi.softAPConfig(IPAddress(4,3,2,1), ...) in the
+// library itself) - a known, unchanging address the operator can go to
+// directly, instead of hunting for a dynamic IP off Serial.
+const char *kApGatewayUrl = "http://4.3.2.1/provision-extra";
 
 // SecurIoT-Setup-<last 4 hex of MAC>, per CONTEXT.md - avoids AP name
 // collisions between multiple devices in the field.
@@ -52,7 +74,8 @@ const char kProvisionExtraFormHtml[] PROGMEM = R"HTML(
 <!DOCTYPE html><html><head><meta charset="utf-8">
 <title>SecurIoT device setup</title></head><body>
 <h1>SecurIoT device setup</h1>
-<p>WiFi connected. Enter the Edge API URL and device key to finish setup.</p>
+<p>WiFi credentials accepted. Stay connected to the SecurIoT-Setup network
+and enter the Edge API URL and device key below to finish setup.</p>
 <form method="POST" action="/provision-extra">
   <label>Edge API URL (e.g. http://192.168.0.22:5000)<br>
     <input type="text" name="edgeApiUrl" required></label><br><br>
@@ -108,6 +131,21 @@ void handleProvisionExtraGet(AsyncWebServerRequest *request) {
     request->send(200, "text/html", kProvisionExtraFormHtml);
 }
 
+// Redirects "/" to /provision-extra once credentials are validated. This
+// handler is registered BEFORE espConnect.begin() (so it lands first in
+// AsyncWebServer's handler list), but its filter only returns true once
+// g_credentialsValidated - during the WiFi-form phase it's skipped and
+// falls through to MycilaESPConnect's own "/" handler (its filter checks
+// PORTAL_STARTED). Once credentials validate, this one wins instead. This
+// is what makes the OS's captive-portal detection chain straight into
+// /provision-extra: the OS periodically re-probes connectivity endpoints
+// (/generate_204, /hotspot-detect.html, etc.), MycilaESPConnect always
+// redirects those to "/" regardless of state, and "/" now points here -
+// no IP-hunting required, the operator's phone never leaves the AP.
+void handleRootRedirect(AsyncWebServerRequest *request) {
+    request->redirect("/provision-extra");
+}
+
 void handleProvisionExtraPost(AsyncWebServerRequest *request) {
     if (!request->hasParam("edgeApiUrl", true) || !request->hasParam("deviceKey", true)) {
         request->send(400, "text/html", kProvisionExtraRetryHtml);
@@ -124,7 +162,7 @@ void handleProvisionExtraPost(AsyncWebServerRequest *request) {
     }
 
     saveConfig(g_capturedSsid, g_capturedPassword, edgeApiUrl, deviceKey);
-    g_awaitingExtraForm = false;
+    g_credentialsValidated = false;
     Serial.println("Provisioning: config saved, restarting");
     request->send(200, "text/html", kProvisionExtraSavedHtml);
     delay(200); // let the response flush before restarting
@@ -158,6 +196,14 @@ void provisioningBegin(bool force) {
     server.on("/provision-extra", HTTP_GET, handleProvisionExtraGet);
     server.on("/provision-extra", HTTP_POST, handleProvisionExtraPost);
 
+    // Registered before espConnect.begin() so it lands first in
+    // AsyncWebServer's handler list, ahead of MycilaESPConnect's own "/"
+    // handler (see handleRootRedirect()'s comment above).
+    AsyncCallbackWebHandler *rootRedirectHandler =
+        &server.on("/", HTTP_GET, handleRootRedirect);
+    rootRedirectHandler->setFilter(
+        [](__unused AsyncWebServerRequest *request) { return g_credentialsValidated; });
+
     espConnect.listen([](Mycila::ESPConnect::State previous, Mycila::ESPConnect::State current) {
         (void)previous;
         switch (current) {
@@ -165,16 +211,23 @@ void provisioningBegin(bool force) {
             case Mycila::ESPConnect::State::PORTAL_STARTED:
                 indicatePortalActive();
                 break;
-            case Mycila::ESPConnect::State::NETWORK_CONNECTED: {
+            case Mycila::ESPConnect::State::PORTAL_COMPLETE: {
                 Mycila::ESPConnect::Config cfg = espConnect.getConfig();
                 // Config.wifiSSID/wifiPassword are std::string, not
                 // Arduino String - explicit c_str() conversion required.
                 g_capturedSsid = String(cfg.wifiSSID.c_str());
                 g_capturedPassword = String(cfg.wifiPassword.c_str());
-                g_awaitingExtraForm = true;
-                Serial.print("Provisioning: WiFi connected, IP=");
-                Serial.print(WiFi.localIP());
-                Serial.println(" - browse to http://<that IP>/provision-extra to finish setup");
+                g_credentialsValidated = true;
+                // Deliberate: see g_espConnectLoopPaused's declaration
+                // comment - this stops espConnect.loop() from tearing
+                // down the SoftAP on the very next call.
+                g_espConnectLoopPaused = true;
+                Serial.println("Provisioning: WiFi credentials accepted, WiFi connected (STA) "
+                                "while SoftAP stays up");
+                Serial.print("Provisioning: browse to ");
+                Serial.print(kApGatewayUrl);
+                Serial.println(" (stay connected to the SecurIoT-Setup network - most phones "
+                                "open this automatically)");
                 break;
             }
             default:
@@ -184,11 +237,14 @@ void provisioningBegin(bool force) {
 
     espConnect.setBlocking(false);
     // Without this, MycilaESPConnect restarts the device itself right after
-    // WiFi connects (NETWORK_CONNECTED), before the operator ever reaches
-    // /provision-extra - saveConfig() would never have run, so "configured"
-    // stays false and the device loops back into AP/portal mode from
-    // scratch. This project owns the restart manually, only after a
-    // successful /provision-extra submission (see handleProvisionExtraPost).
+    // WiFi credentials validate (PORTAL_COMPLETE), before the operator ever
+    // reaches /provision-extra - saveConfig() would never have run, so
+    // "configured" stays false and the device loops back into AP/portal
+    // mode from scratch. This project owns the restart manually, only
+    // after a successful /provision-extra submission (see
+    // handleProvisionExtraPost). Also see g_espConnectLoopPaused's comment:
+    // even with setAutoRestart(false), the library's own loop() still tears
+    // down the SoftAP on PORTAL_COMPLETE unless we stop calling loop().
     // [VERIFIED: mathieucarbou/MycilaESPConnect/src/MycilaESPConnect.h:220,
     // default _autoRestart = true]
     espConnect.setAutoRestart(false);
@@ -202,7 +258,10 @@ void provisioningBegin(bool force) {
 }
 
 bool provisioningActive() {
-    if (g_awaitingExtraForm) {
+    if (g_credentialsValidated) {
+        // Still waiting on /provision-extra (or its Edge API ping retry)
+        // - espConnect.loop() is paused so its own state stays frozen at
+        // PORTAL_COMPLETE, this flag is the source of truth from here on.
         return true;
     }
     Mycila::ESPConnect::State state = espConnect.getState();
@@ -211,6 +270,12 @@ bool provisioningActive() {
 }
 
 void provisioningLoop() {
+    if (g_espConnectLoopPaused) {
+        // AsyncWebServer and the DNS server are both event-driven, not
+        // loop()-driven - they keep serving /provision-extra and
+        // redirecting captive-portal probes to "/" without this call.
+        return;
+    }
     espConnect.loop();
 }
 
