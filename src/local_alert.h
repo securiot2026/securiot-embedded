@@ -17,6 +17,19 @@ void triggerLocalAlert();
 // previous alert instead of latching it.
 void clearLocalAlert();
 
+// Manual "light" actuator (Phase 7 manual command queue): drives the same
+// WS2812 status LED white while a manual light command is active (`on ==
+// true`), returns it to the normal idle/connected color when the command
+// clears (`on == false`). Deliberately NOT built on triggerLocalAlert() —
+// that couples the LED to the buzzer and blocks for kBuzzerPulseMs, neither
+// of which a standalone manual light command should do.
+void setManualLight(bool on);
+
+// Manual "buzzer" actuator (Phase 7 manual command queue): turns the
+// buzzer tone on/off directly, non-blocking (no delay()), independent of
+// the LED. Distinct from triggerLocalAlert()'s fixed-duration pulse.
+void setManualBuzzer(bool on);
+
 // Status LED blue: WiFi connecting or reconnecting. Called from
 // wifi_manager.cpp.
 void indicateWifiConnecting();

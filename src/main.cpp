@@ -143,6 +143,33 @@ void handleFramesResponse(HTTPClient &http) {
     } else {
         clearLocalAlert();
     }
+
+    // Manual command (Phase 7): delivered on this same /frames response,
+    // independent of detection state. The Edge API already resolved
+    // precedence against the same-cycle automatic pan/tilt tracking delta
+    // (it omits pan_delta/tilt_delta above when a manual pan_tilt command
+    // is present) — the firmware only needs to dispatch whichever value it
+    // received.
+    JsonVariant manualCommand = doc["manual_command"];
+    if (!manualCommand.isNull()) {
+        const char *actuator = manualCommand["actuator"] | "";
+        JsonVariant action = manualCommand["action"];
+
+        Serial.print("manual_command actuator=");
+        Serial.println(actuator);
+
+        if (strcmp(actuator, "pan_tilt") == 0) {
+            float manualPan = action["pan_delta"].isNull() ? NAN : action["pan_delta"].as<float>();
+            float manualTilt = action["tilt_delta"].isNull() ? NAN : action["tilt_delta"].as<float>();
+            if (!isnan(manualPan) && !isnan(manualTilt)) {
+                applyPanTilt(manualPan, manualTilt);
+            }
+        } else if (strcmp(actuator, "light") == 0) {
+            setManualLight(action["on"] | false);
+        } else if (strcmp(actuator, "buzzer") == 0) {
+            setManualBuzzer(action["on"] | false);
+        }
+    }
 }
 
 void captureAndSendFrame() {

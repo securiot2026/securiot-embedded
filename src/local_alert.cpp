@@ -55,6 +55,18 @@ void clearLocalAlert() {
     indicateWifiConnected();
 }
 
+void setManualLight(bool on) {
+    if (on) {
+        setPixelColor(255, 255, 255);
+    } else {
+        indicateWifiConnected();
+    }
+}
+
+void setManualBuzzer(bool on) {
+    ledcWriteTone(kBuzzerPin, on ? kBuzzerToneHz : 0);
+}
+
 void indicateWifiConnecting() {
     setPixelColor(0, 0, 255);
 }
