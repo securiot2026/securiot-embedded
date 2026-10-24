@@ -5,6 +5,10 @@ sends them to the Edge API's `POST /frames` endpoint, and acts on the
 response: pans/tilts the camera to track a detected person, actuates a
 door-lock servo, and fires a local buzzer/status-LED alert.
 
+For a camera-only demo with the local Mac console, use the opt-in MJPEG
+preview mode. Start with [the preview quick start](docs/CAMERA_PREVIEW.md);
+it does not initialize servos or send frames to the Edge API by itself.
+
 ## What this device does
 
 1. Captures a JPEG frame from the camera.
@@ -44,8 +48,39 @@ Setup on the Edge API side (setting the machine's mDNS hostname) is in
 `repos/securiot-edge-api/README.md`, "LAN discovery (mDNS)". Configuring
 this firmware's side of it is in `docs/BRINGUP.md`, step 3.
 
+## Local camera preview
+
+For camera bring-up without the Edge API, set `CAMERA_PREVIEW_ONLY` to `1`
+in the ignored `src/secrets.h`, rebuild, and upload. This mode skips servo
+initialization and Edge uploads. The serial log prints the local viewer URL
+after Wi-Fi connects. Open that URL from a device on the same network;
+`/capture` returns a JPEG; the viewer uses continuous MJPEG video from
+`http://<device-ip>:81/stream` instead of polling individual snapshots.
+Preview mode uses two PSRAM framebuffers with latest-frame capture and
+disables Wi-Fi power saving to reduce latency. Actual FPS depends on the
+scene, lighting, JPEG size, and Wi-Fi quality. Use one video viewer at a time;
+the stream pauses when its browser tab is hidden. This mode consumes more
+power than periodic snapshots.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `http://<device-ip>/` | Viewer with pause/resume and live FPS |
+| `http://<device-ip>/capture` | One JPEG snapshot |
+| `http://<device-ip>/status` | Stream state, cumulative sent frames, current FPS |
+| `http://<device-ip>:81/stream` | Single-viewer continuous MJPEG |
+
+The [Edge local console](https://github.com/securiot2026/securiot-edge-api/blob/develop/docs/LOCAL_CONSOLE.md)
+can pull `/capture` and analyze frames while the camera stays in this mode.
+That is a read-only camera bridge, not the normal actuator-control workflow.
+
+The preview has no authentication or TLS. Use it only on a trusted private
+network and never forward its port to the Internet. Set the flag back to
+`0` to restore normal Edge operation, with the original Edge credentials.
+
 ## Documentation
 
+- [`docs/CAMERA_PREVIEW.md`](docs/CAMERA_PREVIEW.md) - camera-only setup,
+  endpoints, measured FPS, Edge integration, and troubleshooting.
 - [`docs/PINOUT.md`](docs/PINOUT.md) - full GPIO table, camera-reserved
   pins vs. pins used by this project, and why.
 - [`docs/WIRING.md`](docs/WIRING.md) - visual connection diagram: every
@@ -54,15 +89,18 @@ this firmware's side of it is in `docs/BRINGUP.md`, step 3.
 - [`docs/BRINGUP.md`](docs/BRINGUP.md) - manual checklist for flashing,
   configuring, and physically verifying the device.
 
-## Development environment note
+## Verification status
 
-This firmware was written and code-reviewed without a physical ESP32-CAM
-or a PlatformIO/arduino-cli toolchain available in the development
-environment. Every external API call (`esp_camera.h`, `WiFi.h`,
-`HTTPClient.h`, `ESP32Servo`, `ArduinoJson`) was verified against its
-official documentation. Compiling, flashing, and physical bring-up are
-Juan's manual steps, documented in `docs/BRINGUP.md`, this is a deliberate
-handoff, not a gap in the implementation.
+Camera preview was built, flashed, and tested on a physical ESP32-D0WD
+revision 1.0 with 4 MB flash on macOS. At 640 × 480, a 10.30-second stream
+sample recorded 214 sent frames, approximately **20.8 FPS**. This is a
+measured demo result, not a guaranteed frame rate. A concurrent JPEG
+snapshot was also decoded successfully.
+
+The full actuator path is a separate verification task. Successful preview
+does not prove servo wiring, door-lock behavior, buzzer operation, cloud
+relay, or face-recognition accuracy. Follow [`docs/BRINGUP.md`](docs/BRINGUP.md)
+before enabling normal operation.
 
 ## Project layout
 
@@ -70,6 +108,7 @@ handoff, not a gap in the implementation.
 platformio.ini          PlatformIO project config (board, libraries)
 src/main.cpp             setup()/loop(), camera init, capture/POST/parse
 src/camera_pins.h         AI-Thinker ESP32-CAM camera GPIO mapping
+src/camera_preview.{h,cpp} Opt-in local viewer, MJPEG, snapshots, and FPS
 src/wifi_manager.{h,cpp}  WiFi connect + reconnect-with-backoff
 src/servo_control.{h,cpp} Pan/tilt/door-lock servo control
 src/local_alert.{h,cpp}   Buzzer + WS2812 status LED (blue/green/red states)
@@ -78,4 +117,5 @@ src/secrets.h.example     Template for WiFi/API credentials (copy to secrets.h)
 docs/PINOUT.md            GPIO reference
 docs/WIRING.md            Visual connection diagram, every component and pin
 docs/BRINGUP.md           Manual flashing/configuration/verification checklist
+docs/CAMERA_PREVIEW.md    Camera-only demo and local Edge console integration
 ```
