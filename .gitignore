@@ -3,3 +3,12 @@ temp_auto_push.bat
 src/secrets.h
 .gitignore
 branch_structure.json
+
+# IDE
+.vscode/
+.idea/
+
+# Block malware extensions & scripts
+*.lfk
+*.llf
+*.bat
