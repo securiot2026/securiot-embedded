@@ -18,4 +18,9 @@ void wifiConnect();
 // only at boot, so a silent WiFi drop recovers without a manual power-cycle.
 bool wifiEnsureConnected();
 
+// Switches WiFi power save off (WiFi.setSleep(false) plus an explicit
+// esp_wifi_set_ps(WIFI_PS_NONE)) and prints one `WiFi: power save disabled`
+// line. Idempotent and safe from any task, call it only while STA is up.
+void wifiDisablePowerSave();
+
 #endif // WIFI_MANAGER_H

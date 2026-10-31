@@ -1,7 +1,9 @@
 #include "wifi_manager.h"
 
 #include <WiFi.h>
+#include <esp_wifi.h>
 
+#include "link_stability.h"
 #include "local_alert.h"
 #include "provisioning.h"
 
@@ -18,6 +20,17 @@ const unsigned long kPortalConfigRecheckIntervalMs = 500;
 
 unsigned long g_reconnectBackoffMs = kReconnectBackoffMinMs;
 unsigned long g_lastReconnectAttemptMs = 0;
+
+// Whether the previous observation saw the STA link up. Used to apply power
+// save off (and log it) on the rising edge only, once per link-up.
+bool g_linkWasUp = false;
+
+void trackLink(bool up) {
+    if (linkShouldApplyPowerSave(g_linkWasUp, up)) {
+        wifiDisablePowerSave();
+    }
+    g_linkWasUp = up;
+}
 
 // One attempt at WiFi.begin() with stored credentials, blocking up to
 // kInitialConnectTimeoutMs. Returns true if it connected.
@@ -42,6 +55,7 @@ bool attemptStoredConnect(const String &ssid, const String &password) {
     Serial.print("WiFi: connected, IP=");
     Serial.println(WiFi.localIP());
     indicateWifiConnected();
+    trackLink(true);
     return true;
 }
 
@@ -63,6 +77,17 @@ void waitForPortalConfig(String &ssid, String &password, String &edgeApiUrl, Str
 }
 
 } // namespace
+
+void wifiDisablePowerSave() {
+    // setSleep(false) keeps the Arduino cached sleep type coherent, so the core
+    // re-applies it on every STA_START. It returns early without touching the
+    // driver when the cached type is already none, hence the explicit call.
+    WiFi.setSleep(false);
+    const esp_err_t err = esp_wifi_set_ps(WIFI_PS_NONE);
+    char line[48];
+    linkFormatPowerSaveLog(line, sizeof(line), (int)err);
+    Serial.println(line);
+}
 
 void wifiConnect() {
     provisioningBegin();
@@ -99,9 +124,12 @@ void wifiConnect() {
 bool wifiEnsureConnected() {
     if (WiFi.status() == WL_CONNECTED) {
         g_reconnectBackoffMs = kReconnectBackoffMinMs;
+        trackLink(true);
         return true;
     }
 
+    // Records the drop so the next link-up re-applies power save and logs once.
+    trackLink(false);
     indicateWifiConnecting();
 
     unsigned long now = millis();
@@ -120,6 +148,7 @@ bool wifiEnsureConnected() {
     bool connected = WiFi.status() == WL_CONNECTED;
     if (connected) {
         indicateWifiConnected();
+        trackLink(true);
     }
     return connected;
 }

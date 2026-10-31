@@ -7,6 +7,7 @@
 #include "camera_pins.h"
 #include "camera_preview.h"
 #include "frame_response.h"
+#include "link_stability.h"
 #include "local_alert.h"
 #include "provisioning.h"
 #include "secrets.h"
@@ -267,6 +268,8 @@ void captureAndSendFrame() {
     memcpy(body + offset, tail.c_str(), tail.length());
 
     HTTPClient http;
+    http.setConnectTimeout(LINK_FRAMES_POST_CONNECT_TIMEOUT_MS);
+    http.setTimeout(LINK_FRAMES_POST_RESPONSE_TIMEOUT_MS);
     String url = g_edgeApiBaseUrl + "/frames";
     http.begin(url);
     http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
@@ -286,7 +289,11 @@ void captureAndSendFrame() {
         if (httpCode > 0) {
             Serial.printf("Edge API returned HTTP %d\n", httpCode);
         } else {
-            Serial.printf("HTTP POST failed: %s\n", http.errorToString(httpCode).c_str());
+            // Numeric code on purpose: HTTPClient reports every connect failure,
+            // timeouts included, as the same refused code.
+            char line[48];
+            linkFormatPostFailLog(line, sizeof(line), httpCode);
+            Serial.println(line);
         }
 
         // A wrong/stale resolved IP (Edge API host restarted with a new

@@ -22,9 +22,12 @@
 // The check must finish well under it, so the two HTTPClient timeouts below add
 // up to at most PROVISIONING_PING_BUDGET_MS. The DNS lookup of a hostname is NOT
 // covered by these timeouts (the form asks for an IP style URL, accepted risk).
-#define PROVISIONING_PING_CONNECT_TIMEOUT_MS 1500
+// The connect timeout grew from 1500 to 2000 ms because the real board's ping to
+// a healthy Edge failed with code -1 at 1500 ms on the flaky link. The invariant
+// budget <= watchdog minus 1500 ms is unchanged (3500 + 1500 = 5000).
+#define PROVISIONING_PING_CONNECT_TIMEOUT_MS 2000
 #define PROVISIONING_PING_RESPONSE_TIMEOUT_MS 1500
-#define PROVISIONING_PING_BUDGET_MS 3000
+#define PROVISIONING_PING_BUDGET_MS 3500
 #define PROVISIONING_TASK_WDT_MS 5000
 
 static_assert(PROVISIONING_PING_CONNECT_TIMEOUT_MS + PROVISIONING_PING_RESPONSE_TIMEOUT_MS <= PROVISIONING_PING_BUDGET_MS,

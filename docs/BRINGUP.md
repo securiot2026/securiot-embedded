@@ -157,9 +157,18 @@ firmware prints these line families:
   lines show each change of the WiFi status on the way.
 - `Provisioning: Edge API ping code=N elapsed_ms=T`: the reachability check of
   the Edge API URL after you submit the setup form. N is the HTTP status, or a
-  negative HTTPClient error such as `-1` (connection refused) or `-11` (read
-  timeout). T is the time the check took and stays under about 3000 ms. A
+  negative HTTPClient error such as `-1` (connect failed or timed out) or `-11`
+  (read timeout). T is the time the check took and stays under about 3500 ms. A
   failed check shows the retry page and saves nothing.
+- `WiFi: power save disabled`: printed once after every WiFi link-up (boot
+  connect, each reconnect, the portal STA). If it is missing after a connect,
+  the radio is still in modem sleep, which causes high ping and lost packets.
+  `WiFi: power save disable failed err=N` means the driver refused the change.
+- `HTTP POST failed: code=N`: the frame upload to the Edge API failed. N is the
+  numeric HTTPClient code: `-1` the connect failed or timed out, `-2` send
+  header failed, `-3` send payload failed, `-4` not connected, `-5` connection
+  lost, `-11` the Edge did not answer in time. Codes above 0 print as
+  `Edge API returned HTTP N`.
 - `Provisioning: no complete config, cleared stale WiFi settings, starting
   portal`: at boot the device found no complete saved config, erased the
   leftover WiFi settings of the portal library and opened the portal, so enter
@@ -193,6 +202,21 @@ The log never prints the network name, the password, the device key, the Edge
 URL, query strings or form data. It only shows the last 3 bytes of a MAC
 address and the local STA IP.
 
+#### Network stability notes
+
+- WiFi power save is switched off after every link-up. The default modem sleep
+  of the Arduino-ESP32 core delayed packets on the real board (mean ping 344 ms
+  with loss).
+- The `/frames` POST waits at most 1500 ms for the connection and 2500 ms for
+  the response, about 4 s in total.
+- The upload of the JPEG body itself is not bounded by these two values: the
+  core retries a stalled send up to 10 times at 1 s each, so a very bad link can
+  still stall one cycle longer.
+- If the Edge inference regularly takes longer than 2.5 s, the log shows
+  `code=-11`. Raise `LINK_FRAMES_POST_RESPONSE_TIMEOUT_MS` in
+  `src/link_stability.h` (keep connect plus response within
+  `LINK_FRAMES_POST_BUDGET_MS`).
+
 ## 4. Physical verification checklist
 
 Perform these checks with the device on the external 5V supply, not on USB
@@ -222,9 +246,14 @@ power:
       `AP station connected`, then `AP station IP assigned`, then
       `Portal HTTP:` lines including at least one `[captive-probe]`.
 - [ ] Submit `/provision-extra` with an Edge API URL that does not answer and
-      confirm the retry page appears within about 3 seconds, the log shows
-      `Edge API ping code=` with `elapsed_ms` under 3000 and the board does not
+      confirm the retry page appears within about 3.5 seconds, the log shows
+      `Edge API ping code=` with `elapsed_ms` under 3500 and the board does not
       reboot.
+- [ ] After each WiFi connect the log shows `WiFi: power save disabled`
+      exactly once.
+- [ ] With the board running, a ping from a laptop on the same network to the
+      board shows steady replies without multi-hundred-millisecond swings and
+      without loss, and `HTTP POST failed: code=` lines are rare or absent.
 - [ ] Tick `AP mode` on the WiFi page and confirm the log shows
       `PORTAL_COMPLETE rejected reason=ap_mode` and the SecurIoT-Setup portal
       comes back.

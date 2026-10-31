@@ -12,6 +12,7 @@
 #include "portal_prefill.h"
 #include "provisioning_guard.h"
 #include "secrets.h"
+#include "wifi_manager.h"
 
 // Compiled fallbacks, used only when NVS holds no valid portal-provided
 // identity (device provisioned before Phase 12). The legacy placeholders are
@@ -181,8 +182,11 @@ const char kProvisionExtraSavedHtml[] PROGMEM = R"HTML(
 // This runs inside the async_tcp task, which has a 5 s task watchdog. The old
 // 5000 ms connect timeout plus the 5 s default response timeout could block it
 // about 10 s and reboot the board before saveConfig() ran. Both timeouts now
-// come from provisioning_guard.h and add up to at most about 3 s. Feeding or
-// disabling the watchdog was rejected as the fix. The log line carries only the
+// come from provisioning_guard.h (connect 2000 ms, response 1500 ms) and add up
+// to at most about 3.5 s, still 1.5 s under the watchdog. The connect timeout
+// was raised from 1500 ms because the ping to a healthy Edge failed with code
+// -1 at 1500 ms on the flaky link. Feeding or disabling the watchdog was
+// rejected as the fix. The log line carries only the
 // HTTP code and the elapsed time, never the URL (it can hold the device key).
 bool pingEdgeApi(const String &edgeApiUrl) {
     HTTPClient http;
@@ -339,8 +343,9 @@ void logPortalRequest(AsyncWebServerRequest *request) {
     Serial.printf("Portal HTTP: %s %s%s\n", request->methodToString(), path, portalDiagIsProbePath(path) ? " [captive-probe]" : "");
 }
 
-// Runs on the Arduino WiFi event task, so it only formats and prints. It
-// touches no shared state and no NVS.
+// Runs on the Arduino WiFi event task, so it only formats and prints. On
+// STA_GOT_IP it also switches power save off, an idempotent call that touches
+// no shared state and no NVS.
 void onPortalWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
     char mac[16];
     switch (event) {
@@ -366,6 +371,7 @@ void onPortalWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
             break;
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
             Serial.printf("Portal WiFi: STA got IP %s\n", WiFi.localIP().toString().c_str());
+            wifiDisablePowerSave();
             break;
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
             Serial.printf("Portal WiFi: STA disconnected reason=%u\n", (unsigned)info.wifi_sta_disconnected.reason);
