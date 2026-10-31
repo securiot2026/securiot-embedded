@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <ESP32Servo.h>
 
+#include "servo_motion.h"
+
 namespace {
 
 // GPIO assignments, must stay in sync with docs/PINOUT.md and must never
@@ -11,27 +13,17 @@ const int kPanServoPin = 13;
 const int kTiltServoPin = 15;
 const int kDoorServoPin = 14;
 
-const int kServoMinAngle = 0;
-const int kServoMaxAngle = 180;
 const int kServoCenterAngle = 90;
 const int kDoorLockedAngle = 180;
-
-// Maximum degrees moved per frame for a full-scale (+/-1.0) delta. Keeps
-// pan/tilt tracking smooth instead of slamming to an extreme on one frame.
-const float kMaxStepDegrees = 10.0f;
 
 Servo g_panServo;
 Servo g_tiltServo;
 Servo g_doorServo;
 
-float g_panAngle = kServoCenterAngle;
-float g_tiltAngle = kServoCenterAngle;
-
-float clampAngle(float angle) {
-    if (angle < kServoMinAngle) return kServoMinAngle;
-    if (angle > kServoMaxAngle) return kServoMaxAngle;
-    return angle;
-}
+// Motion profile state per axis (math lives in servo_motion.h).
+ServoMotion g_pan;
+ServoMotion g_tilt;
+uint32_t g_lastTickMs = 0;
 
 } // namespace
 
@@ -51,18 +43,31 @@ void servosInit() {
     g_tiltServo.attach(kTiltServoPin);
     g_doorServo.attach(kDoorServoPin);
 
-    g_panAngle = kServoCenterAngle;
-    g_tiltAngle = kServoCenterAngle;
-    g_panServo.write((int)g_panAngle);
-    g_tiltServo.write((int)g_tiltAngle);
+    servoMotionInit(g_pan, kServoCenterAngle);
+    servoMotionInit(g_tilt, kServoCenterAngle);
+    g_panServo.write(kServoCenterAngle);
+    g_tiltServo.write(kServoCenterAngle);
+    g_lastTickMs = millis();
 }
 
 void applyPanTilt(float panDelta, float tiltDelta) {
-    g_panAngle = clampAngle(g_panAngle + panDelta * kMaxStepDegrees);
-    g_tiltAngle = clampAngle(g_tiltAngle + tiltDelta * kMaxStepDegrees);
+    // Targets only; servoTick() performs the motion.
+    servoMotionCommand(g_pan, panDelta);
+    servoMotionCommand(g_tilt, tiltDelta);
+}
 
-    g_panServo.write((int)g_panAngle);
-    g_tiltServo.write((int)g_tiltAngle);
+void servoTick() {
+    const uint32_t steps = servoClockSteps(g_lastTickMs, millis());
+    if (steps == 0) return;
+
+    for (uint32_t i = 0; i < steps; i++) {
+        servoMotionStep(g_pan);
+        servoMotionStep(g_tilt);
+    }
+
+    int deg = 0;
+    if (servoMotionPendingWrite(g_pan, deg)) g_panServo.write(deg);
+    if (servoMotionPendingWrite(g_tilt, deg)) g_tiltServo.write(deg);
 }
 
 void triggerDoorLock() {

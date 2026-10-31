@@ -217,11 +217,32 @@ address and the local STA IP.
   `src/link_stability.h` (keep connect plus response within
   `LINK_FRAMES_POST_BUDGET_MS`).
 
+#### Servo motion profile
+
+- Pan and tilt move on a non-blocking 50 Hz profile run by `servoTick()` at the
+  top of `loop()`. `applyPanTilt()` only sets the target:
+  `target = clamp(target + delta*10, 0, 180)`. The latest command wins.
+- Constants (`src/servo_motion.h`): tick 20 ms, gain k 8 1/s, a_max 400 deg/s
+  squared, v_max 90 deg/s, anti-hunting 0.25 deg and 2 deg/s, 10 deg per
+  full-scale delta.
+- The first proposal for a_max was 360. It was raised to 400 because 360 sits
+  exactly on the stability boundary k*v_max/2 and overshot 0.83 deg on a 134 deg
+  step. At 400 every step from 1 to 180 deg overshoots 0.5 deg or less.
+- A 10 deg step settles in about 0.5 s. `Servo.write()` is called only when the
+  integer degree changes, and never when the target equals the angle.
+- The door servo is unchanged: `triggerDoorLock()` writes 180 directly.
+- The boot messages `ledcAttachChannel(): Pin 13/15/14 is already attached to
+  LEDC` and `ESP32PWM ERROR PWM channel failed to configure` come from
+  ESP32Servo 3.2.1 attaching each pin twice internally. They are harmless and
+  the servos still move.
+
 ## 4. Physical verification checklist
 
 Perform these checks with the device on the external 5V supply, not on USB
 power:
 
+- [ ] With the board running, a pan or tilt command glides instead of snapping,
+      and a new command mid-motion redirects smoothly.
 - [ ] Power on and confirm the status LED shows blue (WiFi connecting),
       then turns green once connected. If it instead blinks red forever,
       camera init failed, see the Serial Monitor for the error.

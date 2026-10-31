@@ -347,6 +347,11 @@ void setup() {
 }
 
 void loop() {
+#if !CAMERA_PREVIEW_ONLY
+    // Non-blocking 50 Hz pan/tilt motion profile; cheap no-op between ticks.
+    servoTick();
+#endif
+
     // Must run every iteration while the AP/portal or /provision-extra
     // window is active (RESEARCH.md Pattern 2); a fast no-op otherwise.
     provisioningLoop();
@@ -373,7 +378,9 @@ void loop() {
 #else
     unsigned long now = millis();
     if (now - g_lastCaptureMs < CAPTURE_INTERVAL_MS) {
-        delay(50);
+        // Short idle sleep so loop() iterates well above 50 Hz and servoTick()
+        // honours its 20 ms tick.
+        delay(10);
         return;
     }
     g_lastCaptureMs = now;
