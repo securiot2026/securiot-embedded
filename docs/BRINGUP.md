@@ -127,6 +127,20 @@ power:
       frames automatically, without a manual power-cycle of the ESP32-CAM.
       This is the WiFi-recovery check from `.planning/research/PITFALLS.md`
       Pitfall 2.
+- [ ] Rules (phase 12): in the Web App, create a rule whose action is a
+      light with a color (for example blue). When it fires, confirm the
+      status LED shows that color for about 5 s and then returns to green.
+- [ ] Create a rule whose action is the buzzer. When it fires, confirm the
+      buzzer sounds for about 5 s and then stops on its own.
+- [ ] From the Mobile app turn Light or Buzzer on. Confirm it stays on across
+      frames (the Serial log keeps printing `alert=false`) until you toggle it
+      off, or for about 2 minutes if you do not. A person detection must still
+      give the red LED and the beep, and then return to the held state.
+- [ ] With face recognition enabled on the Edge, confirm the Serial log prints
+      a `faces count=N known=M` line. No identity name must appear in the log.
+- [ ] A manual `door_lock` command is only reachable through a dry-run with
+      execute true. Run one and confirm the door-lock servo sweeps to its
+      locked position.
 
 If any check fails, capture the Serial Monitor log at the time of failure,
 it is the most useful diagnostic for this firmware.

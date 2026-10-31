@@ -6,6 +6,7 @@
 
 #include "camera_pins.h"
 #include "camera_preview.h"
+#include "frame_response.h"
 #include "local_alert.h"
 #include "provisioning.h"
 #include "secrets.h"
@@ -44,6 +45,12 @@ String g_deviceId;
 String g_zoneId;
 int g_consecutiveRequestFailures = 0;
 const int kFailuresBeforeReResolve = 3;
+
+// Last faces summary from the /frames response (counts only, no identity
+// names or similarity scores: personal data, never stored or logged). Kept in
+// RAM with a timestamp so a future UI can read it; no consumer yet (D-03).
+FacesSummary g_lastFaces;
+unsigned long g_lastFacesMs = 0;
 
 bool initCamera() {
     camera_config_t config = {};
@@ -154,6 +161,21 @@ void handleFramesResponse(HTTPClient &http) {
     if (doorAction && strcmp(doorAction, "lock") == 0) {
         triggerDoorLock();
     }
+
+    // Rule command (Web rule light/buzzer actions, D-03): applied BEFORE the
+    // alert/clear call so triggerLocalAlert()'s trailing re-apply restores the
+    // full composed state (rule effect, holds, alert) after the blocking beep.
+    RuleCommand rule = parseRuleCommand(doc["rule_command"]);
+    if (rule.present) {
+        Serial.print("rule_command actuator=");
+        Serial.println(rule.actuator == ActuatorKind::Light ? "light" : "buzzer");
+        if (rule.actuator == ActuatorKind::Light) {
+            applyRuleLight(rule.on, rule.color[0] ? rule.color : nullptr);
+        } else {
+            applyRuleBuzzer(rule.on);
+        }
+    }
+
     if (alert) {
         triggerLocalAlert();
     } else {
@@ -164,27 +186,50 @@ void handleFramesResponse(HTTPClient &http) {
     // independent of detection state. The Edge API already resolved
     // precedence against the same-cycle automatic pan/tilt tracking delta
     // (it omits pan_delta/tilt_delta above when a manual pan_tilt command
-    // is present) — the firmware only needs to dispatch whichever value it
-    // received.
-    JsonVariant manualCommand = doc["manual_command"];
-    if (!manualCommand.isNull()) {
-        const char *actuator = manualCommand["actuator"] | "";
-        JsonVariant action = manualCommand["action"];
-
-        Serial.print("manual_command actuator=");
-        Serial.println(actuator);
-
-        if (strcmp(actuator, "pan_tilt") == 0) {
-            float manualPan = action["pan_delta"].isNull() ? NAN : action["pan_delta"].as<float>();
-            float manualTilt = action["tilt_delta"].isNull() ? NAN : action["tilt_delta"].as<float>();
-            if (!isnan(manualPan) && !isnan(manualTilt)) {
-                applyPanTilt(manualPan, manualTilt);
-            }
-        } else if (strcmp(actuator, "light") == 0) {
-            setManualLight(action["on"] | false);
-        } else if (strcmp(actuator, "buzzer") == 0) {
-            setManualBuzzer(action["on"] | false);
+    // is present) - the firmware only needs to dispatch whichever value it
+    // received. Light/buzzer commands hold until an explicit off or their TTL
+    // (clearLocalAlert() above does not cancel them, D-05); door_lock only
+    // arrives through the Edge dry-run execute path (plan 12-02).
+    ManualCommand manual = parseManualCommand(doc["manual_command"]);
+    if (manual.present) {
+        const char *name = "unknown";
+        switch (manual.actuator) {
+            case ActuatorKind::PanTilt: name = "pan_tilt"; break;
+            case ActuatorKind::Light: name = "light"; break;
+            case ActuatorKind::Buzzer: name = "buzzer"; break;
+            case ActuatorKind::DoorLock: name = "door_lock"; break;
+            default: break;
         }
+        Serial.print("manual_command actuator=");
+        Serial.println(name);
+
+        switch (manual.actuator) {
+            case ActuatorKind::PanTilt:
+                if (!isnan(manual.panDelta) && !isnan(manual.tiltDelta)) {
+                    applyPanTilt(manual.panDelta, manual.tiltDelta);
+                }
+                break;
+            case ActuatorKind::Light:
+                setManualLight(manual.on, manual.color[0] ? manual.color : nullptr, manual.ttlMs);
+                break;
+            case ActuatorKind::Buzzer:
+                setManualBuzzer(manual.on, manual.ttlMs);
+                break;
+            case ActuatorKind::DoorLock:
+                triggerDoorLock();
+                break;
+            default:
+                break;
+        }
+    }
+
+    // Faces (only present when recognition is on): log counts only. Identity
+    // names and similarity scores are personal data and are never printed.
+    FacesSummary faces = parseFaces(doc["faces"]);
+    if (faces.present) {
+        g_lastFaces = faces;
+        g_lastFacesMs = millis();
+        Serial.printf("faces count=%d known=%d\n", faces.count, faces.known);
     }
 }
 
