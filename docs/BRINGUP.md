@@ -60,9 +60,48 @@ stores them in NVS, so they survive a reboot without reflashing.
    when NVS holds no portal-provided identity.
 2. Power on an unconfigured device. It opens the access point
    `SecurIoT-Setup-XXXX` (the last four hex digits of its MAC address).
-3. Join that network from a phone or laptop and fill in the WiFi form
-   (network name and password).
-4. After the WiFi credentials are accepted, stay connected to the same
+
+### 3a. Recommended: Setup QR
+
+Prerequisites:
+
+- The Cloud API has `EDGE_DEVICE_SHARED_SECRET` set to the same value as the
+  Edge `DEVICE_SHARED_SECRET`.
+- The device's Edge URL is saved on its Face recognition page in the Web App.
+
+Steps:
+
+1. In the Web App open Devices, press "Configure device" on the row of this
+   device, then press "Show setup QR".
+2. Join `SecurIoT-Setup-XXXX` from the phone. Check that the suffix matches
+   the one of your device.
+3. Scan the QR with the phone camera and open the link. It points at
+   `http://4.3.2.1/provision-extra`, the fixed address of the setup access
+   point.
+4. If you scan before entering the WiFi, the page first sends you to the WiFi
+   form. Type the WiFi network name and password. The next page already has
+   Edge API URL, device key, Device id and Zone id filled. Check them and press
+   "Save and connect".
+5. An invalid or missing value in the link simply leaves that field empty, so
+   you can type it yourself. The manual steps below still work for any field.
+
+Secret handling:
+
+- The QR and the link contain the device key. The setup access point is open
+  and the link travels unencrypted, so do the setup in a private place.
+- Do not share or screenshot the QR. The Web App hides it after about 2
+  minutes.
+- Open the link only while the phone is connected to the SecurIoT-Setup
+  network, because `4.3.2.1` is a routable public address on any other
+  network.
+- The setup page strips the secret from the address bar after it loads and is
+  served with no-store caching.
+
+### 3b. Manual fallback
+
+1. Join the `SecurIoT-Setup-XXXX` network from a phone or laptop and fill in
+   the WiFi form (network name and password).
+2. After the WiFi credentials are accepted, stay connected to the same
    network and open `http://4.3.2.1/provision-extra`. Most phones open it
    automatically. Fill in four fields:
    - **Edge API URL**: for example `http://192.168.1.50:5000`.
@@ -74,7 +113,7 @@ stores them in NVS, so they survive a reboot without reflashing.
      Swagger UI at `/api/docs`).
    - **Zone id**: the `zoneId` field of that same device in the same
      `GET /api/v1/devices` response.
-5. Press "Save and connect". The device checks that the Edge API answers,
+3. Press "Save and connect". The device checks that the Edge API answers,
    saves the values and restarts. An id with a space, a slash or any
    character other than letters, digits, dot, underscore and hyphen is
    rejected and nothing is saved.
@@ -113,6 +152,13 @@ power:
 - [ ] In the portal, enter a Device id containing a space or a slash and
       confirm the form is rejected and nothing is saved (the device does not
       restart).
+- [ ] The Setup QR flow prefills all four fields (Edge API URL, device key,
+      Device id and Zone id) on the page that follows the WiFi step.
+- [ ] Open a setup link with a bad Device id (for example one containing a
+      slash) and confirm that field is left empty while the other three are
+      still filled.
+- [ ] While the portal is open, the Serial log shows at most about two
+      `nvs_open failed` lines per second instead of a flood.
 - [ ] Confirm the log shows at least one full capture -> POST -> response
       cycle, with `pan_delta`/`tilt_delta`/`door_action`/`alert` printed.
 - [ ] Present a person to the camera and confirm the pan and tilt servos

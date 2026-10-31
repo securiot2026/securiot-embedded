@@ -8,6 +8,7 @@
 
 #include "device_identity.h"
 #include "local_alert.h"
+#include "portal_prefill.h"
 #include "secrets.h"
 
 // Compiled fallbacks, used only when NVS holds no valid portal-provided
@@ -63,6 +64,12 @@ bool g_espConnectLoopPaused = false;
 String g_capturedSsid;
 String g_capturedPassword;
 
+// Setup-link prefill (Setup QR). RAM only, never written to Serial, filled from
+// the query args of GET /provision-extra. It survives until reboot so the later
+// post-WiFi visit to /provision-extra (the "/" redirect drops the query string)
+// still prefills the form.
+PortalPrefill g_prefill;
+
 bool started = false;
 
 // Fixed SoftAP gateway IP MycilaESPConnect configures for every captive
@@ -83,7 +90,12 @@ String apSsidWithMacSuffix() {
     return "SecurIoT-Setup-" + String(buf);
 }
 
-const char kProvisionExtraFormHtml[] PROGMEM = R"HTML(
+// The form page is assembled from static PROGMEM segments plus, for each of
+// the four inputs, a value attribute built by valueAttribute() (escaped, only
+// inside double quotes). No value is ever placed in script, element text or an
+// unquoted context. On ESP32 PROGMEM data is directly readable, so plain
+// String concatenation of these pointers works.
+const char kFormHead[] PROGMEM = R"HTML(
 <!DOCTYPE html><html><head><meta charset="utf-8">
 <title>SecurIoT device setup</title></head><body>
 <h1>SecurIoT device setup</h1>
@@ -93,19 +105,45 @@ to finish setup. The Device id and the Zone id must match the Device registered
 in the Web App, otherwise rules, manual control and the live feed will not work.</p>
 <form method="POST" action="/provision-extra">
   <label>Edge API URL (e.g. http://192.168.0.22:5000)<br>
-    <input type="text" name="edgeApiUrl" required></label><br><br>
+    <input type="text" name="edgeApiUrl" required)HTML";
+
+const char kFormAfterEdge[] PROGMEM = R"HTML(></label><br><br>
   <label>Device key<br>
-    <input type="text" name="deviceKey" required></label><br><br>
+    <input type="text" name="deviceKey" required)HTML";
+
+const char kFormAfterKey[] PROGMEM = R"HTML(></label><br><br>
   <label>Device id (copy it from the Web App)<br>
     <input type="text" name="deviceId" required maxlength="64"
-           pattern="[A-Za-z0-9._\-]{1,64}" autocomplete="off"></label><br><br>
+           pattern="[A-Za-z0-9._\-]{1,64}" autocomplete="off")HTML";
+
+const char kFormAfterDeviceId[] PROGMEM = R"HTML(></label><br><br>
   <label>Zone id (copy it from the Web App)<br>
     <input type="text" name="zoneId" required maxlength="64"
-           pattern="[A-Za-z0-9._\-]{1,64}" autocomplete="off"></label><br><br>
+           pattern="[A-Za-z0-9._\-]{1,64}" autocomplete="off")HTML";
+
+// Static script, no interpolation: strips the query string (which may carry the
+// device key) from the address bar once the page has loaded.
+const char kFormTail[] PROGMEM = R"HTML(></label><br><br>
   <input type="submit" value="Save and connect">
 </form>
+<script>history.replaceState(null,"",location.pathname);</script>
 </body></html>
 )HTML";
+
+String buildProvisionExtraFormHtml() {
+    String html;
+    html.reserve(1800);
+    html += kFormHead;
+    html += valueAttribute(g_prefill.edgeApiUrl).c_str();
+    html += kFormAfterEdge;
+    html += valueAttribute(g_prefill.deviceKey).c_str();
+    html += kFormAfterKey;
+    html += valueAttribute(g_prefill.deviceId).c_str();
+    html += kFormAfterDeviceId;
+    html += valueAttribute(g_prefill.zoneId).c_str();
+    html += kFormTail;
+    return html;
+}
 
 const char kProvisionExtraRetryHtml[] PROGMEM = R"HTML(
 <!DOCTYPE html><html><head><meta charset="utf-8">
@@ -161,8 +199,48 @@ void saveConfig(const String &ssid, const String &password,
     prefs.end();
 }
 
+// Reads one setup-link query arg; NULL-equivalent (empty String) when absent.
+// The returned String is only ever fed to sanitizePortalPrefill, never logged.
+bool readQueryArg(AsyncWebServerRequest *request, const char *name, String &out) {
+    if (!request->hasParam(name)) {
+        return false;
+    }
+    out = request->getParam(name)->value();
+    return true;
+}
+
 void handleProvisionExtraGet(AsyncWebServerRequest *request) {
-    request->send(200, "text/html", kProvisionExtraFormHtml);
+    String edgeApiUrl, deviceKey, deviceId, zoneId;
+    const bool hasEdge = readQueryArg(request, "edgeApiUrl", edgeApiUrl);
+    const bool hasKey = readQueryArg(request, "deviceKey", deviceKey);
+    const bool hasId = readQueryArg(request, "deviceId", deviceId);
+    const bool hasZone = readQueryArg(request, "zoneId", zoneId);
+    const bool hasArgs = hasEdge || hasKey || hasId || hasZone;
+
+    if (hasArgs) {
+        // Replaces the previous stash wholesale, so an invalid value leaves
+        // its field empty. Only a count is logged, never a value.
+        g_prefill = sanitizePortalPrefill(hasEdge ? edgeApiUrl.c_str() : nullptr,
+                                          hasKey ? deviceKey.c_str() : nullptr,
+                                          hasId ? deviceId.c_str() : nullptr,
+                                          hasZone ? zoneId.c_str() : nullptr);
+        const int acceptedFields = g_prefill.count();
+        Serial.printf("Provisioning: setup link accepted %d of 4 fields\n", acceptedFields);
+
+        if (!g_credentialsValidated) {
+            // The WiFi step is not done yet: the POST would have no captured
+            // SSID. Send the operator to the library's WiFi form first; after
+            // PORTAL_COMPLETE the existing "/" redirect lands here again and
+            // the stashed values prefill the form.
+            request->redirect("/");
+            return;
+        }
+    }
+
+    AsyncWebServerResponse *response =
+        request->beginResponse(200, "text/html", buildProvisionExtraFormHtml());
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
 }
 
 // Redirects "/" to /provision-extra once credentials are validated. This

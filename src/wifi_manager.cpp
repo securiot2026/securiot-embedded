@@ -11,6 +11,10 @@ const unsigned long kInitialConnectTimeoutMs = 20000;
 const unsigned long kReconnectBackoffMinMs = 1000;
 const unsigned long kReconnectBackoffMaxMs = 30000;
 const int kMaxStoredCredentialAttempts = 3;
+// Limits NVS re-reads while the portal is open. A missing namespace logs
+// "nvs_open failed: NOT_FOUND" on every read, so polling every 10 ms floods
+// the Serial log.
+const unsigned long kPortalConfigRecheckIntervalMs = 500;
 
 unsigned long g_reconnectBackoffMs = kReconnectBackoffMinMs;
 unsigned long g_lastReconnectAttemptMs = 0;
@@ -41,6 +45,23 @@ bool attemptStoredConnect(const String &ssid, const String &password) {
     return true;
 }
 
+// Blocks until the stored config is valid, i.e. until the operator finished the
+// portal. provisioningLoop() runs on every iteration (it feeds the portal and
+// the delay yields), but NVS is only re-read once per
+// kPortalConfigRecheckIntervalMs.
+void waitForPortalConfig(String &ssid, String &password, String &edgeApiUrl, String &deviceKey) {
+    unsigned long lastCheckMs = millis();
+    bool configured = false;
+    while (!configured) {
+        provisioningLoop();
+        delay(10);
+        if (millis() - lastCheckMs >= kPortalConfigRecheckIntervalMs) {
+            lastCheckMs = millis();
+            configured = provisioningLoadConfig(ssid, password, edgeApiUrl, deviceKey);
+        }
+    }
+}
+
 } // namespace
 
 void wifiConnect() {
@@ -55,10 +76,8 @@ void wifiConnect() {
     // operator is still filling out the form / the portal is validating -
     // by the time it exits, the caller is effectively on the post-restart
     // boot path anyway.
-    while (!configured) {
-        provisioningLoop();
-        delay(10);
-        configured = provisioningLoadConfig(ssid, password, edgeApiUrl, deviceKey);
+    if (!configured) {
+        waitForPortalConfig(ssid, password, edgeApiUrl, deviceKey);
     }
 
     for (int attempt = 1; attempt <= kMaxStoredCredentialAttempts; attempt++) {
@@ -74,12 +93,7 @@ void wifiConnect() {
     // per CONTEXT.md's locked decision.
     Serial.println("WiFi: 3 failed attempts against stored credentials, reopening portal");
     provisioningBegin(/*force=*/true);
-    configured = false;
-    while (!configured) {
-        provisioningLoop();
-        delay(10);
-        configured = provisioningLoadConfig(ssid, password, edgeApiUrl, deviceKey);
-    }
+    waitForPortalConfig(ssid, password, edgeApiUrl, deviceKey);
 }
 
 bool wifiEnsureConnected() {
