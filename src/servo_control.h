@@ -1,6 +1,8 @@
 #ifndef SERVO_CONTROL_H
 #define SERVO_CONTROL_H
 
+#include "servo_motion.h"
+
 // Attaches the pan, tilt and door-lock Servo objects to their GPIO pins
 // (see docs/PINOUT.md) and centers pan/tilt. Call once from setup().
 void servosInit();
@@ -15,9 +17,14 @@ void applyPanTilt(float panDelta, float tiltDelta);
 // Non-blocking.
 void servoTick();
 
-// Sweeps the door-lock servo to its locked angle and holds it there.
-// MVP scope: this does not implement an "unlock" path, HW-04 only requires
-// the automatic-response simulation, not a full access-control cycle.
+// Opens (0 deg) or closes (180 deg) the door through the same smooth ramp as
+// pan/tilt. DoorState::Unknown is ignored. Non-blocking: this only sets the
+// target, the motion happens in servoTick(). The door servo is never written
+// at boot; the first command writes its own angle directly, later ones ramp.
+void doorSetState(DoorState state);
+
+// Legacy alias of doorSetState(DoorState::Close), kept for the Edge rule
+// door_action "lock" and the door_lock manual command.
 void triggerDoorLock();
 
 #endif // SERVO_CONTROL_H

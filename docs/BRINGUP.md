@@ -230,11 +230,23 @@ address and the local STA IP.
   step. At 400 every step from 1 to 180 deg overshoots 0.5 deg or less.
 - A 10 deg step settles in about 0.5 s. `Servo.write()` is called only when the
   integer degree changes, and never when the target equals the angle.
-- The door servo is unchanged: `triggerDoorLock()` writes 180 directly.
 - The boot messages `ledcAttachChannel(): Pin 13/15/14 is already attached to
   LEDC` and `ESP32PWM ERROR PWM channel failed to configure` come from
   ESP32Servo 3.2.1 attaching each pin twice internally. They are harmless and
   the servos still move.
+
+#### Door open and close
+
+- `{actuator: door, action: {state: open|close}}` moves the door servo: open is
+  0 deg, close is 180 deg. Only the exact lowercase strings are accepted; any
+  other state is ignored.
+- The motion reuses the pan/tilt ramp (about 2.3 s for a full swing, measured
+  at 114 ticks). Repeating the same command writes nothing.
+- The door servo is not written at boot. A servo holds its last position and
+  the firmware cannot know it, so the first door command after a reboot writes
+  its own angle directly (one write) and every later command ramps.
+- The legacy `door_lock` manual command and the Edge rule `door_action: lock`
+  stay as an alias of close.
 
 ## 4. Physical verification checklist
 
@@ -243,6 +255,8 @@ power:
 
 - [ ] With the board running, a pan or tilt command glides instead of snapping,
       and a new command mid-motion redirects smoothly.
+- [ ] Door: from the Mobile App send open and then close. Confirm the horn
+      moves smoothly (about 2 s) and that rebooting the board does not move it.
 - [ ] Power on and confirm the status LED shows blue (WiFi connecting),
       then turns green once connected. If it instead blinks red forever,
       camera init failed, see the Serial Monitor for the error.

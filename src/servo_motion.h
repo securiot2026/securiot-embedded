@@ -28,6 +28,15 @@
 // The latest command wins: servoMotionCommand only moves the target and the
 // profile redirects from the current theta and v without a jump.
 // Nothing here blocks and nothing here touches an Arduino symbol.
+//
+// Door: the door servo reuses the same profile with an ABSOLUTE target
+// (open = 0 deg, close = 180 deg) instead of the relative pan/tilt delta. The
+// servo physical position is unknown after a reboot (a servo holds its last
+// position and the firmware never writes the door at boot), so the FIRST door
+// command starts the motion at its own target with one direct write, the same
+// single write the old lock performed. Every later command ramps from the
+// current angle. A repeated command is idempotent: target equals theta, so no
+// write is reported.
 
 #include <math.h>
 #include <stddef.h>
@@ -96,6 +105,63 @@ inline bool servoMotionPendingWrite(ServoMotion &m, int &outDeg) {
     m.written = deg;
     outDeg = deg;
     return true;
+}
+
+// ---- Door (absolute open/close through the same ramp) ----------------------
+
+enum class DoorState : uint8_t {
+    Unknown = 0,
+    Open,
+    Close,
+};
+
+static const int kDoorOpenDeg = 0;
+static const int kDoorCloseDeg = 180;
+
+struct DoorMotion {
+    ServoMotion motion;
+    bool started;  // false until the first valid command after boot
+};
+
+// Nothing is pending after init: the door is never written at boot.
+inline void doorMotionInit(DoorMotion &d) {
+    d.motion.theta = 0.0f;
+    d.motion.v = 0.0f;
+    d.motion.target = 0.0f;
+    d.motion.written = 0;
+    d.started = false;
+}
+
+// Angle for a state, or -1 for Unknown.
+inline int doorAngleFor(DoorState state) {
+    if (state == DoorState::Open) return kDoorOpenDeg;
+    if (state == DoorState::Close) return kDoorCloseDeg;
+    return -1;
+}
+
+// Unknown is ignored (also on a fresh DoorMotion). First valid command: start
+// at the commanded angle and report it exactly once. Later commands: only the
+// absolute target moves, the profile ramps from the current theta and v.
+inline void doorMotionCommand(DoorMotion &d, DoorState state) {
+    const int angle = doorAngleFor(state);
+    if (angle < 0) return;
+    if (!d.started) {
+        servoMotionInit(d.motion, (float)angle);
+        d.motion.written = -1;  // force one pending write of this angle
+        d.started = true;
+        return;
+    }
+    d.motion.target = servoClampf((float)angle, kServoMinDeg, kServoMaxDeg);
+}
+
+inline void doorMotionStep(DoorMotion &d) {
+    if (!d.started) return;
+    servoMotionStep(d.motion);
+}
+
+inline bool doorMotionPendingWrite(DoorMotion &d, int &outDeg) {
+    if (!d.started) return false;
+    return servoMotionPendingWrite(d.motion, outDeg);
 }
 
 // Number of 20 ms ticks to run now. Wrap-safe: elapsed is an unsigned

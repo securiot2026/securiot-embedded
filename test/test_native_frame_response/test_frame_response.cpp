@@ -124,6 +124,44 @@ void test_manual_door_lock(void) {
     TEST_ASSERT_TRUE(mc.actuator == ActuatorKind::DoorLock);
 }
 
+void test_manual_door_open_and_close(void) {
+    JsonDocument doc;
+    load(doc, "{\"o\":{\"actuator\":\"door\",\"action\":{\"state\":\"open\"}},"
+              "\"c\":{\"actuator\":\"door\",\"action\":{\"state\":\"close\"}}}");
+    ManualCommand o = parseManualCommand(doc["o"]);
+    ManualCommand c = parseManualCommand(doc["c"]);
+    TEST_ASSERT_TRUE(o.present);
+    TEST_ASSERT_TRUE(o.actuator == ActuatorKind::Door);
+    TEST_ASSERT_TRUE(o.doorState == DoorState::Open);
+    TEST_ASSERT_TRUE(c.actuator == ActuatorKind::Door);
+    TEST_ASSERT_TRUE(c.doorState == DoorState::Close);
+}
+
+void test_manual_door_invalid_state_is_unknown(void) {
+    JsonDocument doc;
+    load(doc, "{\"noState\":{\"actuator\":\"door\",\"action\":{}},"
+              "\"noAction\":{\"actuator\":\"door\"},"
+              "\"upper\":{\"actuator\":\"door\",\"action\":{\"state\":\"OPEN\"}},"
+              "\"ajar\":{\"actuator\":\"door\",\"action\":{\"state\":\"ajar\"}},"
+              "\"num\":{\"actuator\":\"door\",\"action\":{\"state\":1}},"
+              "\"nul\":{\"actuator\":\"door\",\"action\":{\"state\":null}}}");
+    const char *keys[] = {"noState", "noAction", "upper", "ajar", "num", "nul"};
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        ManualCommand mc = parseManualCommand(doc[keys[i]]);
+        TEST_ASSERT_TRUE_MESSAGE(mc.present, keys[i]);
+        TEST_ASSERT_TRUE_MESSAGE(mc.actuator == ActuatorKind::Door, keys[i]);
+        TEST_ASSERT_TRUE_MESSAGE(mc.doorState == DoorState::Unknown, keys[i]);
+    }
+}
+
+void test_manual_door_lock_legacy_has_no_door_state(void) {
+    JsonDocument doc;
+    load(doc, "{\"m\":{\"actuator\":\"door_lock\",\"action\":{\"state\":\"open\"}}}");
+    ManualCommand mc = parseManualCommand(doc["m"]);
+    TEST_ASSERT_TRUE(mc.actuator == ActuatorKind::DoorLock);
+    TEST_ASSERT_TRUE(mc.doorState == DoorState::Unknown);
+}
+
 void test_manual_pan_tilt_values_and_nan(void) {
     JsonDocument doc;
     load(doc, "{\"ok\":{\"actuator\":\"pan_tilt\",\"action\":{\"pan_delta\":2.5,\"tilt_delta\":-1}},"
@@ -190,6 +228,9 @@ int main(int argc, char **argv) {
     RUN_TEST(test_manual_buzzer_same_without_color);
     RUN_TEST(test_manual_on_defaults_to_false);
     RUN_TEST(test_manual_door_lock);
+    RUN_TEST(test_manual_door_open_and_close);
+    RUN_TEST(test_manual_door_invalid_state_is_unknown);
+    RUN_TEST(test_manual_door_lock_legacy_has_no_door_state);
     RUN_TEST(test_manual_pan_tilt_values_and_nan);
     RUN_TEST(test_manual_unknown_and_null);
     RUN_TEST(test_faces_counts_known_and_unknown);

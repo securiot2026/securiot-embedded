@@ -14,7 +14,6 @@ const int kTiltServoPin = 15;
 const int kDoorServoPin = 14;
 
 const int kServoCenterAngle = 90;
-const int kDoorLockedAngle = 180;
 
 Servo g_panServo;
 Servo g_tiltServo;
@@ -23,6 +22,7 @@ Servo g_doorServo;
 // Motion profile state per axis (math lives in servo_motion.h).
 ServoMotion g_pan;
 ServoMotion g_tilt;
+DoorMotion g_door;  // never written until the first door command
 uint32_t g_lastTickMs = 0;
 
 } // namespace
@@ -45,6 +45,7 @@ void servosInit() {
 
     servoMotionInit(g_pan, kServoCenterAngle);
     servoMotionInit(g_tilt, kServoCenterAngle);
+    doorMotionInit(g_door);  // deliberately no g_doorServo.write() at boot
     g_panServo.write(kServoCenterAngle);
     g_tiltServo.write(kServoCenterAngle);
     g_lastTickMs = millis();
@@ -63,13 +64,19 @@ void servoTick() {
     for (uint32_t i = 0; i < steps; i++) {
         servoMotionStep(g_pan);
         servoMotionStep(g_tilt);
+        doorMotionStep(g_door);
     }
 
     int deg = 0;
     if (servoMotionPendingWrite(g_pan, deg)) g_panServo.write(deg);
     if (servoMotionPendingWrite(g_tilt, deg)) g_tiltServo.write(deg);
+    if (doorMotionPendingWrite(g_door, deg)) g_doorServo.write(deg);
+}
+
+void doorSetState(DoorState state) {
+    doorMotionCommand(g_door, state);
 }
 
 void triggerDoorLock() {
-    g_doorServo.write(kDoorLockedAngle);
+    doorSetState(DoorState::Close);
 }

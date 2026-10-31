@@ -4,7 +4,8 @@
 // Arduino-free parsing of the actuator-related parts of the Edge API's
 // /frames JSON response: rule_command (Web rule light/buzzer actions),
 // manual_command (Mobile commands, including the dry-run execute shapes
-// light/buzzer with optional color and duration_s, and door_lock) and the
+// light/buzzer with optional color and duration_s, door open/close and the
+// legacy door_lock alias) and the
 // optional faces array. Pure functions over a read-only ArduinoJson variant,
 // fixed-size buffers, no dynamic allocation, so they can be tested on the host
 // (`pio test -e native`). main.cpp applies the parsed values to the hardware.
@@ -16,6 +17,7 @@
 #include <string.h>
 
 #include "alert_state.h"
+#include "servo_motion.h"
 
 // Longest color text kept (named color or #RRGGBB). Longer values are ignored
 // (the field stays empty and the caller's fallback color applies).
@@ -25,8 +27,9 @@ enum class ActuatorKind : uint8_t {
     Unknown = 0,
     Light,
     Buzzer,
-    DoorLock,
+    DoorLock,  // legacy alias of door close
     PanTilt,
+    Door,
 };
 
 struct RuleCommand {
@@ -44,6 +47,7 @@ struct ManualCommand {
     uint32_t ttlMs = 0;   // 0 = use the default hold; otherwise clamped 1..300 s
     float panDelta = NAN;
     float tiltDelta = NAN;
+    DoorState doorState = DoorState::Unknown;  // actuator door only
 };
 
 struct FacesSummary {
@@ -137,6 +141,18 @@ inline ManualCommand parseManualCommand(JsonVariantConst v) {
         JsonVariantConst d = action["duration_s"];
         if (d.is<double>()) {
             out.ttlMs = clampDurationMs(d.as<double>());
+        }
+    } else if (strcmp(actuator, "door") == 0) {
+        out.actuator = ActuatorKind::Door;
+        // Only the exact lowercase strings map to a state; anything else stays Unknown.
+        JsonVariantConst st = action["state"];
+        if (st.is<const char *>()) {
+            const char *t = st.as<const char *>();
+            if (t != nullptr && strcmp(t, "open") == 0) {
+                out.doorState = DoorState::Open;
+            } else if (t != nullptr && strcmp(t, "close") == 0) {
+                out.doorState = DoorState::Close;
+            }
         }
     } else if (strcmp(actuator, "door_lock") == 0) {
         out.actuator = ActuatorKind::DoorLock;

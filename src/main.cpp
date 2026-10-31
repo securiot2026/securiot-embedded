@@ -189,8 +189,9 @@ void handleFramesResponse(HTTPClient &http) {
     // (it omits pan_delta/tilt_delta above when a manual pan_tilt command
     // is present) - the firmware only needs to dispatch whichever value it
     // received. Light/buzzer commands hold until an explicit off or their TTL
-    // (clearLocalAlert() above does not cancel them, D-05); door_lock only
-    // arrives through the Edge dry-run execute path (plan 12-02).
+    // (clearLocalAlert() above does not cancel them, D-05); door (open/close)
+    // arrives from the public Edge /commands endpoint, door_lock stays the
+    // legacy rule alias of close.
     ManualCommand manual = parseManualCommand(doc["manual_command"]);
     if (manual.present) {
         const char *name = "unknown";
@@ -199,6 +200,7 @@ void handleFramesResponse(HTTPClient &http) {
             case ActuatorKind::Light: name = "light"; break;
             case ActuatorKind::Buzzer: name = "buzzer"; break;
             case ActuatorKind::DoorLock: name = "door_lock"; break;
+            case ActuatorKind::Door: name = "door"; break;
             default: break;
         }
         Serial.print("manual_command actuator=");
@@ -216,8 +218,12 @@ void handleFramesResponse(HTTPClient &http) {
             case ActuatorKind::Buzzer:
                 setManualBuzzer(manual.on, manual.ttlMs);
                 break;
+            case ActuatorKind::Door:
+                // Unknown state is ignored inside doorSetState().
+                doorSetState(manual.doorState);
+                break;
             case ActuatorKind::DoorLock:
-                triggerDoorLock();
+                triggerDoorLock();  // legacy alias of close
                 break;
             default:
                 break;
