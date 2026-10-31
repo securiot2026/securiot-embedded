@@ -6,7 +6,20 @@
 #include <Preferences.h>
 #include <WiFi.h>
 
+#include "device_identity.h"
 #include "local_alert.h"
+#include "secrets.h"
+
+// Compiled fallbacks, used only when NVS holds no valid portal-provided
+// identity (device provisioned before Phase 12). The legacy placeholders are
+// valid identity tokens, so a local secrets.h lacking these macros still
+// builds.
+#ifndef DEVICE_ID
+#define DEVICE_ID "esp32cam-01"
+#endif
+#ifndef ZONE_ID
+#define ZONE_ID "zone-01"
+#endif
 
 namespace {
 
@@ -75,12 +88,20 @@ const char kProvisionExtraFormHtml[] PROGMEM = R"HTML(
 <title>SecurIoT device setup</title></head><body>
 <h1>SecurIoT device setup</h1>
 <p>WiFi credentials accepted. Stay connected to the SecurIoT-Setup network
-and enter the Edge API URL and device key below to finish setup.</p>
+and enter the Edge API URL, the device key, the Device id and the Zone id below
+to finish setup. The Device id and the Zone id must match the Device registered
+in the Web App, otherwise rules, manual control and the live feed will not work.</p>
 <form method="POST" action="/provision-extra">
   <label>Edge API URL (e.g. http://192.168.0.22:5000)<br>
     <input type="text" name="edgeApiUrl" required></label><br><br>
   <label>Device key<br>
     <input type="text" name="deviceKey" required></label><br><br>
+  <label>Device id (copy it from the Web App)<br>
+    <input type="text" name="deviceId" required maxlength="64"
+           pattern="[A-Za-z0-9._\-]{1,64}" autocomplete="off"></label><br><br>
+  <label>Zone id (copy it from the Web App)<br>
+    <input type="text" name="zoneId" required maxlength="64"
+           pattern="[A-Za-z0-9._\-]{1,64}" autocomplete="off"></label><br><br>
   <input type="submit" value="Save and connect">
 </form>
 </body></html>
@@ -91,6 +112,16 @@ const char kProvisionExtraRetryHtml[] PROGMEM = R"HTML(
 <title>SecurIoT device setup - retry</title></head><body>
 <h1>Could not reach the Edge API</h1>
 <p>The Edge API URL you entered did not respond. Check the URL and try again.</p>
+<p><a href="/provision-extra">Back to setup form</a></p>
+</body></html>
+)HTML";
+
+const char kProvisionExtraInvalidIdentityHtml[] PROGMEM = R"HTML(
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>SecurIoT device setup - invalid identity</title></head><body>
+<h1>Invalid Device id or Zone id</h1>
+<p>Both values are required. Use only letters, digits, dot, underscore and
+hyphen, up to 64 characters. Nothing was saved.</p>
 <p><a href="/provision-extra">Back to setup form</a></p>
 </body></html>
 )HTML";
@@ -117,12 +148,15 @@ bool pingEdgeApi(const String &edgeApiUrl) {
 }
 
 void saveConfig(const String &ssid, const String &password,
-                 const String &edgeApiUrl, const String &deviceKey) {
+                 const String &edgeApiUrl, const String &deviceKey,
+                 const String &deviceId, const String &zoneId) {
     prefs.begin(kPrefsNamespace, /*readOnly=*/false);
     prefs.putString("ssid", ssid);
     prefs.putString("password", password);
     prefs.putString("edgeApiUrl", edgeApiUrl);
     prefs.putString("deviceKey", deviceKey);
+    prefs.putString("deviceId", deviceId);
+    prefs.putString("zoneId", zoneId);
     prefs.putBool("configured", true);
     prefs.end();
 }
@@ -152,8 +186,24 @@ void handleProvisionExtraPost(AsyncWebServerRequest *request) {
         return;
     }
 
+    // Validate identity BEFORE pinging the Edge API: a bad value must never
+    // reach NVS or, later, the multipart body. The response does not echo
+    // the submitted values.
+    if (!request->hasParam("deviceId", true) || !request->hasParam("zoneId", true)) {
+        request->send(400, "text/html", kProvisionExtraInvalidIdentityHtml);
+        return;
+    }
+
     String edgeApiUrl = request->getParam("edgeApiUrl", true)->value();
     String deviceKey = request->getParam("deviceKey", true)->value();
+    String deviceId = request->getParam("deviceId", true)->value();
+    String zoneId = request->getParam("zoneId", true)->value();
+
+    if (!isValidIdentityToken(deviceId.c_str()) || !isValidIdentityToken(zoneId.c_str())) {
+        Serial.println("Provisioning: invalid Device id or Zone id, not saving");
+        request->send(400, "text/html", kProvisionExtraInvalidIdentityHtml);
+        return;
+    }
 
     if (!pingEdgeApi(edgeApiUrl)) {
         Serial.println("Provisioning: Edge API ping failed, not saving, re-serving retry form");
@@ -161,7 +211,7 @@ void handleProvisionExtraPost(AsyncWebServerRequest *request) {
         return;
     }
 
-    saveConfig(g_capturedSsid, g_capturedPassword, edgeApiUrl, deviceKey);
+    saveConfig(g_capturedSsid, g_capturedPassword, edgeApiUrl, deviceKey, deviceId, zoneId);
     g_credentialsValidated = false;
     Serial.println("Provisioning: config saved, restarting");
     request->send(200, "text/html", kProvisionExtraSavedHtml);
@@ -307,4 +357,30 @@ String provisioningGetDeviceKey() {
     String ssid, password, edgeApiUrl, deviceKey;
     provisioningLoadConfig(ssid, password, edgeApiUrl, deviceKey);
     return deviceKey;
+}
+
+namespace {
+
+// Reads one identity key from NVS, gated on the "configured" boolean (never
+// on string emptiness, Pitfall 3), and resolves it against the compiled
+// fallback. A bad stored value falls back instead of breaking frame posts.
+String loadIdentity(const char *key, const char *fallback) {
+    prefs.begin(kPrefsNamespace, /*readOnly=*/true);
+    bool configured = prefs.getBool("configured", false);
+    String stored;
+    if (configured) {
+        stored = prefs.getString(key, "");
+    }
+    prefs.end();
+    return String(resolveIdentity(configured ? stored.c_str() : nullptr, fallback));
+}
+
+} // namespace
+
+String provisioningGetDeviceId() {
+    return loadIdentity("deviceId", DEVICE_ID);
+}
+
+String provisioningGetZoneId() {
+    return loadIdentity("zoneId", ZONE_ID);
 }

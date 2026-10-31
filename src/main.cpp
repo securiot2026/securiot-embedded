@@ -37,6 +37,11 @@ unsigned long g_lastCaptureMs = 0;
 // the device with a different URL.
 String g_edgeApiBaseUrl;
 String g_deviceKey;
+// Device id (Cloud Device UUID) and Zone id, portal-provided and stored in
+// NVS (compiled defaults only as fallback, see provisioning.cpp). Cached like
+// the key so there is no NVS read per frame.
+String g_deviceId;
+String g_zoneId;
 int g_consecutiveRequestFailures = 0;
 const int kFailuresBeforeReResolve = 3;
 
@@ -95,11 +100,11 @@ String buildMultipartBody(const String &boundary, camera_fb_t *fb,
     outHead = "";
     outHead += "--" + boundary + "\r\n";
     outHead += "Content-Disposition: form-data; name=\"device_id\"\r\n\r\n";
-    outHead += String(DEVICE_ID) + "\r\n";
+    outHead += g_deviceId + "\r\n";
 
     outHead += "--" + boundary + "\r\n";
     outHead += "Content-Disposition: form-data; name=\"zone_id\"\r\n\r\n";
-    outHead += String(ZONE_ID) + "\r\n";
+    outHead += g_zoneId + "\r\n";
 
     outHead += "--" + boundary + "\r\n";
     outHead += "Content-Disposition: form-data; name=\"frame_width\"\r\n\r\n";
@@ -247,6 +252,8 @@ void captureAndSendFrame() {
         if (g_consecutiveRequestFailures >= kFailuresBeforeReResolve) {
             Serial.println("Edge API: too many consecutive failures, re-resolving base URL");
             g_edgeApiBaseUrl = provisioningGetEdgeApiUrl();
+            g_deviceId = provisioningGetDeviceId();
+            g_zoneId = provisioningGetZoneId();
             g_consecutiveRequestFailures = 0;
         }
     }
@@ -280,6 +287,10 @@ void setup() {
     // Cached once here (not read from Preferences/NVS on every frame) to
     // avoid an NVS read on every HTTP request's latency path.
     g_deviceKey = provisioningGetDeviceKey();
+    g_deviceId = provisioningGetDeviceId();
+    g_zoneId = provisioningGetZoneId();
+    // Ids only, never the device key.
+    Serial.printf("Identity: device_id=%s zone_id=%s\n", g_deviceId.c_str(), g_zoneId.c_str());
 #endif
 }
 

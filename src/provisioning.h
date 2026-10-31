@@ -9,8 +9,9 @@
 //   1. MycilaESPConnect's own AP + portal collects SSID/password only (its
 //      Config struct has no fields for anything else).
 //   2. Once WiFi connects (STA), a custom /provision-extra HTTP form on the
-//      same shared AsyncWebServer collects the Edge API URL and device key.
-// All four values persist in NVS via Preferences (namespace "securiot")
+//      same shared AsyncWebServer collects the Edge API URL, device key,
+//      Device id and Zone id.
+// All six values persist in NVS via Preferences (namespace "securiot")
 // only after the submitted Edge API URL passes a reachability check.
 
 // Starts the provisioning flow if the stored config is missing/invalid:
@@ -47,5 +48,13 @@ bool provisioningLoadConfig(String &ssid, String &password,
 // one field (main.cpp's setup(), captureAndSendFrame()).
 String provisioningGetEdgeApiUrl();
 String provisioningGetDeviceKey();
+
+// Device id (Cloud Device UUID) and Zone id collected by the portal's
+// /provision-extra form. Return the NVS value when the "configured" flag is
+// true and the stored value is a valid identity token (see
+// device_identity.h); otherwise the compiled fallback from secrets.h, so a
+// device provisioned before these fields existed keeps working.
+String provisioningGetDeviceId();
+String provisioningGetZoneId();
 
 #endif // PROVISIONING_H
