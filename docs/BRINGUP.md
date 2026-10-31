@@ -1,9 +1,9 @@
 # Manual Bring-Up Checklist
 
-This firmware was written and code-reviewed in an environment with no
-PlatformIO/arduino-cli toolchain and no physical ESP32-CAM attached. Every
-step below is a manual step for Juan, on his own machine, with the real
-hardware. Nothing in this checklist was performed by the executor.
+This checklist covers the normal Edge/actuator workflow. Camera-only
+preview has been verified on real hardware; servo, door, buzzer, and
+external-power checks below still require an operator to verify them.
+For the camera-only path, see [Camera preview](CAMERA_PREVIEW.md).
 
 Follow the steps in order, do not skip step 1.
 
@@ -51,7 +51,9 @@ combination (see `.planning/research/PITFALLS.md` and the phase ROADMAP).
 
 1. Copy `src/secrets.h.example` to `src/secrets.h`.
 2. Fill in the real WiFi SSID and password. The ESP32-CAM and the machine
-   running the Edge API must be on the same WiFi network.
+    running the Edge API must be on the same WiFi network.
+    Keep `CAMERA_PREVIEW_ONLY` set to `0` for this normal-operation checklist;
+    mode `1` intentionally skips servos and device-to-Edge uploads.
 3. Edge API address, pick one:
    - **mDNS (default, recommended)**: leave `EDGE_API_MDNS_HOST` set to
      `"edge-api"` and set the Edge API host's mDNS hostname to `edge-api`,
@@ -68,8 +70,8 @@ combination (see `.planning/research/PITFALLS.md` and the phase ROADMAP).
    registered.
 5. Rebuild and reflash: `pio run -t upload`.
 
-`src/secrets.h` is listed in `.gitignore` and must never be committed to
-this public repository.
+`src/secrets.h` is listed in `.gitignore` and must never be committed,
+regardless of repository visibility.
 
 ## 4. Physical verification checklist
 

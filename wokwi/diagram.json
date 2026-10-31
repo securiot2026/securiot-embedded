@@ -1,0 +1,296 @@
+{
+  "version": 1,
+  "author": "SECURIOT",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-breadboard",
+      "id": "bb1",
+      "top": 260,
+      "left": -340,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-esp32-devkit-v1",
+      "id": "esp",
+      "top": -20,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "chip-ov2640",
+      "id": "cam",
+      "top": -20,
+      "left": -330,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servoPan",
+      "top": -110,
+      "left": 230,
+      "attrs": {
+        "hornColor": "#1E88E5"
+      }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servoTilt",
+      "top": 10,
+      "left": 230,
+      "attrs": {
+        "hornColor": "#43A047"
+      }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servoDoor",
+      "top": 130,
+      "left": 230,
+      "attrs": {
+        "hornColor": "#E53935"
+      }
+    },
+    {
+      "type": "wokwi-neopixel",
+      "id": "statusLed",
+      "top": 345,
+      "left": -80,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": 320,
+      "left": 40,
+      "attrs": {
+        "volume": "0.3"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "esp:TX0",
+      "$serialMonitor:RX",
+      "",
+      []
+    ],
+    [
+      "esp:RX0",
+      "$serialMonitor:TX",
+      "",
+      []
+    ],
+    [
+      "esp:VIN",
+      "bb1:tp.25",
+      "red",
+      []
+    ],
+    [
+      "esp:GND.1",
+      "bb1:tn.25",
+      "black",
+      []
+    ],
+    [
+      "esp:3V3",
+      "bb1:bp.27",
+      "orange",
+      []
+    ],
+    [
+      "esp:GND.2",
+      "bb1:bn.27",
+      "black",
+      []
+    ],
+    [
+      "bb1:tn.1",
+      "bb1:bn.1",
+      "black",
+      []
+    ],
+    [
+      "servoPan:V+",
+      "bb1:tp.44",
+      "red",
+      []
+    ],
+    [
+      "servoPan:GND",
+      "bb1:tn.44",
+      "black",
+      []
+    ],
+    [
+      "servoPan:PWM",
+      "esp:D13",
+      "orange",
+      []
+    ],
+    [
+      "servoTilt:V+",
+      "bb1:tp.46",
+      "red",
+      []
+    ],
+    [
+      "servoTilt:GND",
+      "bb1:tn.46",
+      "black",
+      []
+    ],
+    [
+      "servoTilt:PWM",
+      "esp:D15",
+      "orange",
+      []
+    ],
+    [
+      "servoDoor:V+",
+      "bb1:tp.48",
+      "red",
+      []
+    ],
+    [
+      "servoDoor:GND",
+      "bb1:tn.48",
+      "black",
+      []
+    ],
+    [
+      "servoDoor:PWM",
+      "esp:D14",
+      "orange",
+      []
+    ],
+    [
+      "statusLed:VDD",
+      "bb1:tp.21",
+      "red",
+      []
+    ],
+    [
+      "statusLed:VSS",
+      "bb1:tn.21",
+      "black",
+      []
+    ],
+    [
+      "statusLed:DIN",
+      "esp:D4",
+      "purple",
+      []
+    ],
+    [
+      "buzzer:1",
+      "bb1:tn.31",
+      "black",
+      []
+    ],
+    [
+      "buzzer:2",
+      "esp:D2",
+      "green",
+      []
+    ],
+    [
+      "cam:3V3",
+      "bb1:bp.3",
+      "orange",
+      []
+    ],
+    [
+      "cam:GND",
+      "bb1:bn.3",
+      "black",
+      []
+    ],
+    [
+      "cam:PWDN",
+      "esp:D32",
+      "gray",
+      []
+    ],
+    [
+      "cam:SIOD",
+      "esp:D26",
+      "blue",
+      []
+    ],
+    [
+      "cam:SIOC",
+      "esp:D27",
+      "blue",
+      []
+    ],
+    [
+      "cam:VSYNC",
+      "esp:D25",
+      "gray",
+      []
+    ],
+    [
+      "cam:HREF",
+      "esp:D23",
+      "gray",
+      []
+    ],
+    [
+      "cam:PCLK",
+      "esp:D22",
+      "gray",
+      []
+    ],
+    [
+      "cam:D7",
+      "esp:D35",
+      "yellow",
+      []
+    ],
+    [
+      "cam:D6",
+      "esp:D34",
+      "yellow",
+      []
+    ],
+    [
+      "cam:D5",
+      "esp:VN",
+      "yellow",
+      []
+    ],
+    [
+      "cam:D4",
+      "esp:VP",
+      "yellow",
+      []
+    ],
+    [
+      "cam:D3",
+      "esp:D21",
+      "yellow",
+      []
+    ],
+    [
+      "cam:D2",
+      "esp:D19",
+      "yellow",
+      []
+    ],
+    [
+      "cam:D1",
+      "esp:D18",
+      "yellow",
+      []
+    ],
+    [
+      "cam:D0",
+      "esp:D5",
+      "yellow",
+      []
+    ]
+  ],
+  "dependencies": {}
+}

@@ -5,11 +5,16 @@
 #include <esp_camera.h>
 
 #include "camera_pins.h"
+#include "camera_preview.h"
 #include "local_alert.h"
 #include "provisioning.h"
 #include "secrets.h"
 #include "servo_control.h"
 #include "wifi_manager.h"
+
+#ifndef CAMERA_PREVIEW_ONLY
+#define CAMERA_PREVIEW_ONLY 0
+#endif
 
 // Frame size / quality for capture. VGA (640x480) keeps the multipart POST
 // small enough for a WiFi upload every cycle while still giving the Edge
@@ -67,6 +72,12 @@ bool initCamera() {
     // ESP32-CAM, see docs/PINOUT.md.
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+#if CAMERA_PREVIEW_ONLY
+    // Two JPEG buffers allow capture and transmission to overlap. Discard
+    // stale queued frames instead of adding latency when Wi-Fi slows down.
+    config.fb_count = 2;
+    config.grab_mode = CAMERA_GRAB_LATEST;
+#endif
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
@@ -250,7 +261,9 @@ void setup() {
     Serial.println();
     Serial.println("SecurIoT ESP32-CAM firmware starting");
 
+#if !CAMERA_PREVIEW_ONLY
     servosInit();
+#endif
     alertInit();
 
     if (!initCamera()) {
@@ -260,10 +273,14 @@ void setup() {
 
     wifiConnect();
 
+#if CAMERA_PREVIEW_ONLY
+    cameraPreviewBegin();
+#else
     g_edgeApiBaseUrl = provisioningGetEdgeApiUrl();
     // Cached once here (not read from Preferences/NVS on every frame) to
     // avoid an NVS read on every HTTP request's latency path.
     g_deviceKey = provisioningGetDeviceKey();
+#endif
 }
 
 void loop() {
@@ -283,6 +300,10 @@ void loop() {
         return;
     }
 
+#if CAMERA_PREVIEW_ONLY
+    // HTTP servers run on their own tasks; keep Wi-Fi recovery responsive.
+    delay(20);
+#else
     unsigned long now = millis();
     if (now - g_lastCaptureMs < CAPTURE_INTERVAL_MS) {
         delay(50);
@@ -291,4 +312,5 @@ void loop() {
     g_lastCaptureMs = now;
 
     captureAndSendFrame();
+#endif
 }
