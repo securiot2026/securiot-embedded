@@ -134,6 +134,46 @@ after you clear NVS.
 `src/secrets.h` is listed in `.gitignore` and must never be committed,
 regardless of repository visibility.
 
+### 3c. Reading the portal log
+
+Keep the Serial Monitor open at 115200 baud while the portal is up. The
+firmware prints these line families:
+
+- `Provisioning: state A -> B`: every state change of the portal library, by
+  name (for example `PORTAL_STARTING -> PORTAL_STARTED`).
+- `Portal WiFi: ...`: `AP station connected` and `AP station disconnected`
+  (with the last 3 MAC bytes and `ap_clients`), `AP station IP assigned`,
+  `STA started`, `STA connected`, `STA got IP x.x.x.x` and
+  `STA disconnected reason=N`.
+- `Portal HTTP: METHOD /path`: one line per request that reached the portal
+  web server. Phone connectivity checks such as `/generate_204`,
+  `/hotspot-detect.html`, `/connecttest.txt`, `/ncsi.txt` and `/fwlink` carry
+  a `[captive-probe]` tag. The line appears once the request is complete.
+- `Provisioning: portal alive, state=..., ap_clients=N, uptime_s=T`: a
+  heartbeat every 10 seconds while the portal is open.
+- `Provisioning: credential test result=success wifi_status=3 (WL_CONNECTED)`
+  or `credential test result=failure wifi_status=N (...)`: the outcome of the
+  WiFi test after you submit the WiFi form. `Provisioning: WiFi status A -> B`
+  lines show each change of the WiFi status on the way.
+
+Where it is stuck:
+
+- The phone joined but there is no `AP station IP assigned` line: the phone
+  never got an address from DHCP.
+- `AP station IP assigned` but no `Portal HTTP:` lines: the phone never reached
+  port 80. DNS queries and captive-portal probing are not logged here, and a
+  request that never completes is not logged either.
+- `ap_clients=0` while the phone says it is connected: the phone already left
+  the setup network.
+- `credential test result=failure` with `wifi_status` 4 or 5, plus
+  `STA disconnected reason=15` or `reason=202`: usually a wrong WiFi password.
+- `STA disconnected reason=201` with `wifi_status` 1: the network was not
+  found (wrong name, out of range, or a 5 GHz only network).
+
+The log never prints the network name, the password, the device key, the Edge
+URL, query strings or form data. It only shows the last 3 bytes of a MAC
+address and the local STA IP.
+
 ## 4. Physical verification checklist
 
 Perform these checks with the device on the external 5V supply, not on USB
@@ -159,6 +199,11 @@ power:
       still filled.
 - [ ] While the portal is open, the Serial log shows at most about two
       `nvs_open failed` lines per second instead of a flood.
+- [ ] With a phone joined to `SecurIoT-Setup-XXXX`, the Serial log shows
+      `AP station connected`, then `AP station IP assigned`, then
+      `Portal HTTP:` lines including at least one `[captive-probe]`.
+- [ ] While the portal stays open, a `portal alive` line appears about every
+      10 seconds and contains no secret.
 - [ ] Confirm the log shows at least one full capture -> POST -> response
       cycle, with `pan_delta`/`tilt_delta`/`door_action`/`alert` printed.
 - [ ] Present a person to the camera and confirm the pan and tilt servos

@@ -8,6 +8,7 @@
 
 #include "device_identity.h"
 #include "local_alert.h"
+#include "portal_diag.h"
 #include "portal_prefill.h"
 #include "secrets.h"
 
@@ -297,6 +298,99 @@ void handleProvisionExtraPost(AsyncWebServerRequest *request) {
     ESP.restart();
 }
 
+// ---- Portal diagnostics (Serial only, secret-free) ----------------------
+// Every line below is built from fixed text, numbers, library state names,
+// WiFi status names, the local STA IP and 3-byte MAC suffixes. Never the
+// network name, the password, the device key, the Edge API URL, a query string,
+// a form body, a header or a client address.
+
+// portal_diag.h hard-codes these wl_status_t numbers. If a core update changes
+// them, break the build here instead of silently mislabeling the log.
+static_assert(WL_NO_SSID_AVAIL == 1, "wl_status_t drifted, update portal_diag.h");
+static_assert(WL_CONNECTED == 3, "wl_status_t drifted, update portal_diag.h");
+static_assert(WL_CONNECT_FAILED == 4, "wl_status_t drifted, update portal_diag.h");
+static_assert(WL_CONNECTION_LOST == 5, "wl_status_t drifted, update portal_diag.h");
+
+const uint32_t kPortalHeartbeatIntervalMs = 10000;
+// No wl_status_t value is negative, so -1 means "not observed yet".
+int g_lastWifiStatus = -1;
+uint32_t g_lastHeartbeatMs = 0;
+
+// One line per portal request: method and path only. request->url() is the
+// path with the query string already split off, but it is URL-decoded, so it
+// goes through the sanitizer before it is printed. No header, parameter,
+// body, response code or client address is read.
+void logPortalRequest(AsyncWebServerRequest *request) {
+    char path[PORTAL_DIAG_PATH_BUF_LEN];
+    portalDiagSanitizePath(request->url().c_str(), path, sizeof(path));
+    Serial.printf("Portal HTTP: %s %s%s\n", request->methodToString(), path, portalDiagIsProbePath(path) ? " [captive-probe]" : "");
+}
+
+// Runs on the Arduino WiFi event task, so it only formats and prints. It
+// touches no shared state and no NVS.
+void onPortalWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
+    char mac[16];
+    switch (event) {
+        case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+            portalDiagFormatMacSuffix(info.wifi_ap_staconnected.mac, mac, sizeof(mac));
+            Serial.printf("Portal WiFi: AP station connected mac=%s ap_clients=%u\n", mac, (unsigned)WiFi.softAPgetStationNum());
+            break;
+        case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+            portalDiagFormatMacSuffix(info.wifi_ap_stadisconnected.mac, mac, sizeof(mac));
+            Serial.printf("Portal WiFi: AP station disconnected mac=%s ap_clients=%u\n", mac, (unsigned)WiFi.softAPgetStationNum());
+            break;
+        case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
+            // The assigned address is deliberately not printed, only the fact.
+            portalDiagFormatMacSuffix(info.wifi_ap_staipassigned.mac, mac, sizeof(mac));
+            Serial.printf("Portal WiFi: AP station IP assigned mac=%s\n", mac);
+            break;
+        case ARDUINO_EVENT_WIFI_STA_START:
+            Serial.println("Portal WiFi: STA started");
+            break;
+        case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+            // Never the network name or BSSID from the info union.
+            Serial.println("Portal WiFi: STA connected");
+            break;
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+            Serial.printf("Portal WiFi: STA got IP %s\n", WiFi.localIP().toString().c_str());
+            break;
+        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+            Serial.printf("Portal WiFi: STA disconnected reason=%u\n", (unsigned)info.wifi_sta_disconnected.reason);
+            break;
+        default:
+            break;
+    }
+}
+
+// Cheap per-call check (one status read plus one millis compare). Prints only
+// on a WiFi status change and once every kPortalHeartbeatIntervalMs, never per
+// call. The failure verdict needs a previous observation, so the first reading
+// (for example after a forced reopen with stale stored credentials) is only a
+// baseline and never counts as a failed credential test.
+void portalDiagnosticsTick() {
+    const int status = (int)WiFi.status();
+    if (status != g_lastWifiStatus) {
+        const int previous = g_lastWifiStatus;
+        g_lastWifiStatus = status;
+        if (previous < 0) {
+            Serial.printf("Provisioning: WiFi status %d (%s)\n", status, portalDiagWifiStatusName(status));
+        } else {
+            Serial.printf("Provisioning: WiFi status %d (%s) -> %d (%s)\n", previous, portalDiagWifiStatusName(previous), status, portalDiagWifiStatusName(status));
+            if (portalDiagIsCredentialTestFailureStatus(status) && !g_credentialsValidated) {
+                Serial.printf("Provisioning: credential test result=failure wifi_status=%d (%s)\n", status, portalDiagWifiStatusName(status));
+            }
+        }
+    }
+
+    const uint32_t now = millis();
+    if (portalDiagIntervalElapsed(now, g_lastHeartbeatMs, kPortalHeartbeatIntervalMs)) {
+        g_lastHeartbeatMs = now;
+        if (provisioningActive()) {
+            Serial.printf("Provisioning: portal alive, state=%s, ap_clients=%u, uptime_s=%lu\n", espConnect.getStateName(), (unsigned)WiFi.softAPgetStationNum(), (unsigned long)(now / 1000UL));
+        }
+    }
+}
+
 } // namespace
 
 void provisioningBegin(bool force) {
@@ -320,6 +414,21 @@ void provisioningBegin(bool force) {
     }
 
     started = true;
+    g_lastHeartbeatMs = millis();
+
+    // Request log. A server-level middleware, not a not-found handler: the
+    // library re-installs its own not-found handler when the portal starts, so
+    // a handler set here would be overwritten, while the server-level chain
+    // runs for every request, matched or not. The line appears once the whole
+    // request has been received. The bundled logging middleware is not used,
+    // it prints every header. This always continues the chain, exactly once.
+    server.addMiddleware([](AsyncWebServerRequest *request, ArMiddlewareNext next) {
+        logPortalRequest(request);
+        next();
+    });
+
+    // Registered once per boot (this branch runs once, see the started guard).
+    WiFi.onEvent(onPortalWifiEvent);
 
     server.on("/provision-extra", HTTP_GET, handleProvisionExtraGet);
     server.on("/provision-extra", HTTP_POST, handleProvisionExtraPost);
@@ -333,7 +442,7 @@ void provisioningBegin(bool force) {
         [](__unused AsyncWebServerRequest *request) { return g_credentialsValidated; });
 
     espConnect.listen([](Mycila::ESPConnect::State previous, Mycila::ESPConnect::State current) {
-        (void)previous;
+        Serial.printf("Provisioning: state %s -> %s\n", espConnect.getStateName(previous), espConnect.getStateName(current));
         switch (current) {
             case Mycila::ESPConnect::State::AP_STARTED:
             case Mycila::ESPConnect::State::PORTAL_STARTED:
@@ -356,6 +465,14 @@ void provisioningBegin(bool force) {
                 Serial.print(kApGatewayUrl);
                 Serial.println(" (stay connected to the SecurIoT-Setup network - most phones "
                                 "open this automatically)");
+                // Verdict of the library's WiFi credential test. Status code
+                // only, never the network name or the password.
+                const int wifiStatus = (int)WiFi.status();
+                if (wifiStatus == WL_CONNECTED) {
+                    Serial.printf("Provisioning: credential test result=success wifi_status=%d (%s)\n", wifiStatus, portalDiagWifiStatusName(wifiStatus));
+                } else {
+                    Serial.printf("Provisioning: portal complete without a connection test wifi_status=%d (%s)\n", wifiStatus, portalDiagWifiStatusName(wifiStatus));
+                }
                 break;
             }
             default:
@@ -398,6 +515,11 @@ bool provisioningActive() {
 }
 
 void provisioningLoop() {
+    // Before the paused early return, so the heartbeat and status edges keep
+    // running after PORTAL_COMPLETE.
+    if (started) {
+        portalDiagnosticsTick();
+    }
     if (g_espConnectLoopPaused) {
         // AsyncWebServer and the DNS server are both event-driven, not
         // loop()-driven - they keep serving /provision-extra and
