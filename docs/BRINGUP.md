@@ -49,26 +49,48 @@ combination (see `.planning/research/PITFALLS.md` and the phase ROADMAP).
 
 ## 3. Configuration
 
-1. Copy `src/secrets.h.example` to `src/secrets.h`.
-2. Fill in the real WiFi SSID and password. The ESP32-CAM and the machine
-    running the Edge API must be on the same WiFi network.
-    Keep `CAMERA_PREVIEW_ONLY` set to `0` for this normal-operation checklist;
-    mode `1` intentionally skips servos and device-to-Edge uploads.
-3. Edge API address, pick one:
-   - **mDNS (default, recommended)**: leave `EDGE_API_MDNS_HOST` set to
-     `"edge-api"` and set the Edge API host's mDNS hostname to `edge-api`,
-     see `securiot-edge-api/README.md`, "LAN discovery (mDNS)". The
-     firmware finds the machine automatically at boot, no IP to maintain.
-   - **Static IP**: comment out `#define EDGE_API_MDNS_HOST` and set
-     `EDGE_API_URL` to the Edge API's LAN IP and port (for example
-     `http://192.168.1.50:5000`). Use this if mDNS is not available (see
-     the Windows note in the Edge API README) or the network blocks it.
-     `EDGE_API_URL` also works as an automatic fallback if mDNS is enabled
-     but fails to resolve, so it is worth filling in either way.
-4. Set `DEVICE_KEY` to the shared secret configured on the Edge API for
-   this device, and set `DEVICE_ID`/`ZONE_ID` to match how this device is
-   registered.
-5. Rebuild and reflash: `pio run -t upload`.
+WiFi, Edge API URL, device key, Device id and Zone id are not compiled into
+the firmware. The operator enters them in the captive portal and the device
+stores them in NVS, so they survive a reboot without reflashing.
+
+1. Copy `src/secrets.h.example` to `src/secrets.h` before building. Keep
+   `CAMERA_PREVIEW_ONLY` set to `0` for this normal-operation checklist;
+   mode `1` intentionally skips servos and device-to-Edge uploads.
+   `DEVICE_ID` and `ZONE_ID` in this file are only fallback defaults, used
+   when NVS holds no portal-provided identity.
+2. Power on an unconfigured device. It opens the access point
+   `SecurIoT-Setup-XXXX` (the last four hex digits of its MAC address).
+3. Join that network from a phone or laptop and fill in the WiFi form
+   (network name and password).
+4. After the WiFi credentials are accepted, stay connected to the same
+   network and open `http://4.3.2.1/provision-extra`. Most phones open it
+   automatically. Fill in four fields:
+   - **Edge API URL**: for example `http://192.168.1.50:5000`.
+   - **Device key**: the shared secret configured on the Edge API.
+   - **Device id**: the Cloud Device UUID of this device in the Web App.
+     Open any per-device page in the Web App and read it from the address
+     bar, the path looks like `/devices/DEVICE-ID/rules`. You can also
+     read the `id` field of `GET /api/v1/devices` (the Cloud API serves
+     Swagger UI at `/api/docs`).
+   - **Zone id**: the `zoneId` field of that same device in the same
+     `GET /api/v1/devices` response.
+5. Press "Save and connect". The device checks that the Edge API answers,
+   saves the values and restarts. An id with a space, a slash or any
+   character other than letters, digits, dot, underscore and hyphen is
+   rejected and nothing is saved.
+
+Why the Device id and Zone id must match the Cloud Device: Edge keys rules,
+manual commands, the latest frame and occupancy by Device id, and the Cloud
+API proxies those calls with the Cloud Device UUID. A different value breaks
+rules, manual control and the live feed.
+
+The Edge URL that the Cloud uses to reach the Edge API is saved separately,
+on the device's Face recognition page in the Web App.
+
+A device provisioned before this change has no Device id or Zone id in NVS.
+It keeps sending the compiled fallback values from `secrets.h` until you
+re-provision it. The portal reopens after three failed WiFi attempts, or
+after you clear NVS.
 
 `src/secrets.h` is listed in `.gitignore` and must never be committed,
 regardless of repository visibility.
@@ -83,10 +105,14 @@ power:
       camera init failed, see the Serial Monitor for the error.
 - [ ] Open the Serial Monitor (`pio device monitor`, 115200 baud) and
       confirm the log shows a successful WiFi connect with an IP address.
-- [ ] Confirm the log shows either "mDNS: resolved Edge API at http://..."
-      or, if using the static fallback, "Edge API: using static
-      EDGE_API_URL=...". If it instead shows "mDNS: query timed out",
-      double check the Edge API host's mDNS hostname (see its README).
+- [ ] Confirm the boot log shows the line `Identity: device_id=... zone_id=...`
+      and that both values match the Device id and Zone id in the Web App.
+- [ ] After provisioning, open the Web App live-feed page for that device
+      (`/devices/DEVICE-ID/live-feed`) and confirm it shows a frame. This
+      proves Edge keyed the frame by the Cloud Device UUID.
+- [ ] In the portal, enter a Device id containing a space or a slash and
+      confirm the form is rejected and nothing is saved (the device does not
+      restart).
 - [ ] Confirm the log shows at least one full capture -> POST -> response
       cycle, with `pan_delta`/`tilt_delta`/`door_action`/`alert` printed.
 - [ ] Present a person to the camera and confirm the pan and tilt servos
