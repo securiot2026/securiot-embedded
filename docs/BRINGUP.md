@@ -155,6 +155,19 @@ firmware prints these line families:
   or `credential test result=failure wifi_status=N (...)`: the outcome of the
   WiFi test after you submit the WiFi form. `Provisioning: WiFi status A -> B`
   lines show each change of the WiFi status on the way.
+- `Provisioning: Edge API ping code=N elapsed_ms=T`: the reachability check of
+  the Edge API URL after you submit the setup form. N is the HTTP status, or a
+  negative HTTPClient error such as `-1` (connection refused) or `-11` (read
+  timeout). T is the time the check took and stays under about 3000 ms. A
+  failed check shows the retry page and saves nothing.
+- `Provisioning: no complete config, cleared stale WiFi settings, starting
+  portal`: at boot the device found no complete saved config, erased the
+  leftover WiFi settings of the portal library and opened the portal, so enter
+  the WiFi again.
+- `Provisioning: PORTAL_COMPLETE rejected reason=ap_mode, restarting portal`
+  (also `reason=no_ssid`): the `AP mode` option of the WiFi page is not
+  supported, leave it unchecked. The portal restarts and the phone must rejoin
+  `SecurIoT-Setup-XXXX`.
 
 Where it is stuck:
 
@@ -169,6 +182,12 @@ Where it is stuck:
   `STA disconnected reason=15` or `reason=202`: usually a wrong WiFi password.
 - `STA disconnected reason=201` with `wifi_status` 1: the network was not
   found (wrong name, out of range, or a 5 GHz only network).
+- The log shows the WiFi connected and then nothing, no portal and no further
+  lines: the portal library's own saved WiFi settings and the device config
+  disagree. Current firmware clears this at boot. If the board is silent after
+  WiFi connected, erase NVS with
+  `esptool.py --chip esp32 --port <serial port> erase_region 0x9000 0x5000`
+  (board in flashing mode as in section 2) or reopen the portal.
 
 The log never prints the network name, the password, the device key, the Edge
 URL, query strings or form data. It only shows the last 3 bytes of a MAC
@@ -202,6 +221,13 @@ power:
 - [ ] With a phone joined to `SecurIoT-Setup-XXXX`, the Serial log shows
       `AP station connected`, then `AP station IP assigned`, then
       `Portal HTTP:` lines including at least one `[captive-probe]`.
+- [ ] Submit `/provision-extra` with an Edge API URL that does not answer and
+      confirm the retry page appears within about 3 seconds, the log shows
+      `Edge API ping code=` with `elapsed_ms` under 3000 and the board does not
+      reboot.
+- [ ] Tick `AP mode` on the WiFi page and confirm the log shows
+      `PORTAL_COMPLETE rejected reason=ap_mode` and the SecurIoT-Setup portal
+      comes back.
 - [ ] While the portal stays open, a `portal alive` line appears about every
       10 seconds and contains no secret.
 - [ ] Confirm the log shows at least one full capture -> POST -> response

@@ -10,6 +10,7 @@
 #include "local_alert.h"
 #include "portal_diag.h"
 #include "portal_prefill.h"
+#include "provisioning_guard.h"
 #include "secrets.h"
 
 // Compiled fallbacks, used only when NVS holds no valid portal-provided
@@ -34,7 +35,6 @@ Mycila::ESPConnect espConnect(server);
 Preferences prefs;
 
 const char *kPrefsNamespace = "securiot";
-const unsigned long kEdgeApiPingTimeoutMs = 5000;
 
 // Set true when MycilaESPConnect validates WiFi credentials
 // (PORTAL_COMPLETE), false again once /provision-extra has been
@@ -177,13 +177,26 @@ const char kProvisionExtraSavedHtml[] PROGMEM = R"HTML(
 // unconfirmed). Any HTTP response code greater than 0 counts as
 // "reachable"; this only proves the URL answers HTTP, not that it is the
 // legitimate Edge API (see 06-01-PLAN.md threat T-06-02, accepted).
+//
+// This runs inside the async_tcp task, which has a 5 s task watchdog. The old
+// 5000 ms connect timeout plus the 5 s default response timeout could block it
+// about 10 s and reboot the board before saveConfig() ran. Both timeouts now
+// come from provisioning_guard.h and add up to at most about 3 s. Feeding or
+// disabling the watchdog was rejected as the fix. The log line carries only the
+// HTTP code and the elapsed time, never the URL (it can hold the device key).
 bool pingEdgeApi(const String &edgeApiUrl) {
     HTTPClient http;
-    http.setConnectTimeout(kEdgeApiPingTimeoutMs);
+    http.setConnectTimeout(PROVISIONING_PING_CONNECT_TIMEOUT_MS);
+    http.setTimeout(PROVISIONING_PING_RESPONSE_TIMEOUT_MS);
+    const uint32_t startMs = millis();
     http.begin(edgeApiUrl);
     int code = http.GET();
     http.end();
-    return code > 0;
+    const uint32_t elapsedMs = provisioningElapsedMs(startMs, millis());
+    char line[64];
+    provisioningFormatPingLog(line, sizeof(line), code, elapsedMs);
+    Serial.println(line);
+    return provisioningPingReachable(code);
 }
 
 void saveConfig(const String &ssid, const String &password,
@@ -401,16 +414,26 @@ void provisioningBegin(bool force) {
         return;
     }
 
-    if (!force) {
-        // Calling espConnect.begin() unconditionally on every boot defeats
-        // the "Preferences first" decision and re-triggers the portal even
-        // when saved credentials are valid (06-RESEARCH.md Anti-Patterns).
-        // Only start the AP/portal when there is no valid stored config
-        // yet, unless the caller forces a reopen (stale credentials).
-        String ssid, password, edgeApiUrl, deviceKey;
-        if (provisioningLoadConfig(ssid, password, edgeApiUrl, deviceKey)) {
-            return;
-        }
+    // Calling espConnect.begin() unconditionally on every boot defeats
+    // the "Preferences first" decision and re-triggers the portal even
+    // when saved credentials are valid (06-RESEARCH.md Anti-Patterns).
+    // Only start the AP/portal when there is no valid stored config
+    // yet, unless the caller forces a reopen (stale credentials).
+    String ssid, password, edgeApiUrl, deviceKey;
+    const bool ourConfigComplete = provisioningLoadConfig(ssid, password, edgeApiUrl, deviceKey);
+    const ProvisioningBootAction bootAction = provisioningDecideBoot(ourConfigComplete, force);
+    if (bootAction == PROVISIONING_BOOT_SKIP_PORTAL) {
+        return;
+    }
+
+    if (bootAction == PROVISIONING_BOOT_CLEAR_STALE_AND_START_PORTAL) {
+        // Boot trap fix: our config is missing, so any WiFi settings the
+        // portal library persisted in its own NVS namespace are stale. Left in
+        // place, the library would boot straight into STA while wifiConnect()
+        // waits forever for a config that never arrives, with no portal and no
+        // logs. Clear them strictly before espConnect.begin().
+        espConnect.clearConfiguration();
+        Serial.println("Provisioning: no complete config, cleared stale WiFi settings, starting portal");
     }
 
     started = true;
@@ -450,6 +473,25 @@ void provisioningBegin(bool force) {
                 break;
             case Mycila::ESPConnect::State::PORTAL_COMPLETE: {
                 Mycila::ESPConnect::Config cfg = espConnect.getConfig();
+                const ProvisioningPortalVerdict verdict = provisioningClassifyPortalComplete(cfg.apMode, cfg.wifiSSID.length());
+                if (verdict != PROVISIONING_PORTAL_ACCEPT) {
+                    // AP mode or an empty SSID: not a usable completion. Reset
+                    // the live config and the persisted library settings, then
+                    // leave the library loop running (g_espConnectLoopPaused
+                    // stays false). With autoRestart false the library stops
+                    // the portal and starts it again by itself, now with apMode
+                    // false and an empty SSID. The phone has to rejoin
+                    // SecurIoT-Setup-XXXX because the SoftAP is recreated.
+                    Mycila::ESPConnect::Config &liveConfig = espConnect.getConfig();
+                    liveConfig.apMode = false;
+                    liveConfig.wifiSSID = "";
+                    liveConfig.wifiPassword = "";
+                    espConnect.clearConfiguration();
+                    char rejectLine[96];
+                    provisioningFormatPortalRejectLog(rejectLine, sizeof(rejectLine), verdict);
+                    Serial.println(rejectLine);
+                    break;
+                }
                 // Config.wifiSSID/wifiPassword are std::string, not
                 // Arduino String - explicit c_str() conversion required.
                 g_capturedSsid = String(cfg.wifiSSID.c_str());
@@ -494,12 +536,23 @@ void provisioningBegin(bool force) {
     // default _autoRestart = true]
     espConnect.setAutoRestart(false);
 
-    // 3-string overload (hostname, AP SSID, AP password): empty password
-    // means an open AP, per CONTEXT.md's locked decision (threat T-06-01,
-    // accepted). No captive-portal timeout is MycilaESPConnect's own
-    // default when no SSID is known yet, matching CONTEXT.md's "no
+    // Config overload (AP SSID, AP password, Config): it does not auto-load or
+    // auto-save, so the library never again writes ssid, password or ap into its
+    // own NVS namespace. That auto-save at PORTAL_COMPLETE is what produced the
+    // boot trap and the stuck plain AP mode. apMode starts false on every boot
+    // (the field is not initialized by default construction, so it is set
+    // explicitly) and the WiFi credentials stay empty, so the library goes
+    // straight to the captive portal. On the forced reopen path this also opens
+    // the portal at once instead of first retrying stored credentials for the
+    // library's 20 s connect timeout.
+    // Empty AP password means an open AP, per CONTEXT.md's locked decision
+    // (threat T-06-01, accepted). No captive-portal timeout is MycilaESPConnect's
+    // own default when no SSID is known yet, matching CONTEXT.md's "no
     // timeout, stays open indefinitely" decision.
-    espConnect.begin("securiot-cam", apSsidWithMacSuffix().c_str(), "");
+    Mycila::ESPConnect::Config portalConfig;
+    portalConfig.hostname = "securiot-cam";
+    portalConfig.apMode = false;
+    espConnect.begin(apSsidWithMacSuffix().c_str(), "", portalConfig);
 }
 
 bool provisioningActive() {
