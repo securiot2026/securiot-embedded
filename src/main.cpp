@@ -311,6 +311,10 @@ void loop() {
         return;
     }
 
+    // Expire manual holds and rule effects (wrap-safe) and repaint the LED and
+    // buzzer if the composed state changed; cheap no-op when nothing changed.
+    alertTick();
+
 #if CAMERA_PREVIEW_ONLY
     // HTTP servers run on their own tasks; keep Wi-Fi recovery responsive.
     delay(20);

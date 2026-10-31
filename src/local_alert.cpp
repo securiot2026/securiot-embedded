@@ -3,6 +3,8 @@
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 
+#include "alert_state.h"
+
 namespace {
 
 // GPIO assignments, must stay in sync with docs/PINOUT.md.
@@ -25,9 +27,30 @@ const uint8_t kBrightness = 40;
 
 Adafruit_NeoPixel g_pixel(kNumPixels, kRgbLedPin, NEO_GRB + NEO_KHZ800);
 
+AlertState g_state;
+Outputs g_last = {{0, 0, 0}, false};
+bool g_lastValid = false;
+
 void setPixelColor(uint8_t r, uint8_t g, uint8_t b) {
     g_pixel.setPixelColor(0, g_pixel.Color(r, g, b));
     g_pixel.show();
+    // A direct paint (Wi-Fi status, portal, fatal error) makes the cached
+    // outputs stale, so the next applyOutputs() must repaint.
+    g_lastValid = false;
+}
+
+// Single source of truth for what the LED and buzzer show: computeOutputs()
+// composes manual holds, rule effects, the generic alert and the idle color.
+// Hardware is only touched when the result changed (or `force` is set).
+void applyOutputs(uint32_t nowMs, bool force) {
+    Outputs o = computeOutputs(g_state, nowMs);
+    if (!force && g_lastValid && o == g_last) {
+        return;
+    }
+    setPixelColor(o.led.r, o.led.g, o.led.b);
+    ledcWriteTone(kBuzzerPin, o.buzzer ? kBuzzerToneHz : 0);
+    g_last = o;
+    g_lastValid = true;
 }
 
 } // namespace
@@ -44,27 +67,69 @@ void alertInit() {
 }
 
 void triggerLocalAlert() {
-    setPixelColor(255, 0, 0);
+    g_state.alert = true;
+    applyOutputs(millis(), false);
+
+    // Blocking confirmation beep. Afterwards the composed state is re-applied
+    // with force so a held manual buzzer or rule buzzer tone is restored (and
+    // an idle buzzer goes silent).
     ledcWriteTone(kBuzzerPin, kBuzzerToneHz);
     delay(kBuzzerPulseMs);
-    ledcWriteTone(kBuzzerPin, 0);
+    applyOutputs(millis(), true);
 }
 
 void clearLocalAlert() {
-    ledcWriteTone(kBuzzerPin, 0);
-    indicateWifiConnected();
+    // Only the generic alert flag is cleared. Manual light/buzzer holds and
+    // rule effects have their own timers, so they are NOT cancelled here
+    // (audit G4, D-05).
+    g_state.alert = false;
+    applyOutputs(millis(), false);
 }
 
-void setManualLight(bool on) {
+void setManualLight(bool on, const char *colorName, uint32_t ttlMs) {
+    uint32_t now = millis();
     if (on) {
-        setPixelColor(255, 255, 255);
+        g_state.manualLightColor = colorFromName(colorName, Rgb{255, 255, 255});
+        g_state.manualLight.set(now, ttlMs == 0 ? kManualHoldTtlMs : ttlMs);
     } else {
-        indicateWifiConnected();
+        g_state.manualLight.clear();
     }
+    applyOutputs(now, false);
 }
 
-void setManualBuzzer(bool on) {
-    ledcWriteTone(kBuzzerPin, on ? kBuzzerToneHz : 0);
+void setManualBuzzer(bool on, uint32_t ttlMs) {
+    uint32_t now = millis();
+    if (on) {
+        g_state.manualBuzzer.set(now, ttlMs == 0 ? kManualHoldTtlMs : ttlMs);
+    } else {
+        g_state.manualBuzzer.clear();
+    }
+    applyOutputs(now, false);
+}
+
+void applyRuleLight(bool on, const char *colorName) {
+    uint32_t now = millis();
+    if (on) {
+        g_state.ruleLightColor = colorFromName(colorName, Rgb{255, 0, 0});
+        g_state.ruleLight.set(now, kRuleEffectMs);
+    } else {
+        g_state.ruleLight.clear();
+    }
+    applyOutputs(now, false);
+}
+
+void applyRuleBuzzer(bool on) {
+    uint32_t now = millis();
+    if (on) {
+        g_state.ruleBuzzer.set(now, kRuleEffectMs);
+    } else {
+        g_state.ruleBuzzer.clear();
+    }
+    applyOutputs(now, false);
+}
+
+void alertTick() {
+    applyOutputs(millis(), false);
 }
 
 void indicateWifiConnecting() {
@@ -72,7 +137,10 @@ void indicateWifiConnecting() {
 }
 
 void indicateWifiConnected() {
-    setPixelColor(0, 255, 0);
+    // Idle color is green; force the repaint so a held manual light is
+    // reasserted after a Wi-Fi reconnect painted the status colors over it.
+    g_state.idleColor = Rgb{0, 255, 0};
+    applyOutputs(millis(), true);
 }
 
 void indicatePortalActive() {

@@ -1,6 +1,8 @@
 #ifndef LOCAL_ALERT_H
 #define LOCAL_ALERT_H
 
+#include <stdint.h>
+
 // Sets up the buzzer pin and the WS2812 status LED. Call once from
 // setup(), before WiFi connects, leaves the LED in the "connecting" color.
 void alertInit();
@@ -11,24 +13,35 @@ void alertInit();
 // detection, not on every frame.
 void triggerLocalAlert();
 
-// Silences the buzzer and returns the LED to the idle color (green, WiFi
-// connected). Called at the top of every response handling pass before the
-// new frame's alert state is applied, so a false/null response clears a
-// previous alert instead of latching it.
+// Clears ONLY the generic detection alert flag (red LED). Called at the top
+// of every response handling pass so a false/null response does not latch a
+// previous alert. It deliberately does NOT cancel an active manual light or
+// buzzer hold, nor a rule effect: those end on an explicit off command or on
+// their own timer (audit G4, D-05). LED and buzzer are recomposed afterwards.
 void clearLocalAlert();
 
-// Manual "light" actuator (Phase 7 manual command queue): drives the same
-// WS2812 status LED white while a manual light command is active (`on ==
-// true`), returns it to the normal idle/connected color when the command
-// clears (`on == false`). Deliberately NOT built on triggerLocalAlert() —
-// that couples the LED to the buzzer and blocks for kBuzzerPulseMs, neither
-// of which a standalone manual light command should do.
-void setManualLight(bool on);
+// Manual "light" actuator. `on == true` holds the status LED in `colorName`
+// (named color or #RRGGBB, default white) until an explicit `on == false` or
+// `ttlMs` elapses (0 = default hold of 120 s). Beats rule effects and the
+// generic alert in LED priority. Does not touch the buzzer and never blocks.
+void setManualLight(bool on, const char *colorName = nullptr, uint32_t ttlMs = 0);
 
-// Manual "buzzer" actuator (Phase 7 manual command queue): turns the
-// buzzer tone on/off directly, non-blocking (no delay()), independent of
-// the LED. Distinct from triggerLocalAlert()'s fixed-duration pulse.
-void setManualBuzzer(bool on);
+// Manual "buzzer" actuator. `on == true` holds the buzzer tone until an
+// explicit `on == false` or `ttlMs` elapses (0 = default 120 s). Non-blocking
+// and independent of the LED; survives clearLocalAlert() and the blocking
+// alert pulse.
+void setManualBuzzer(bool on, uint32_t ttlMs = 0);
+
+// Rule effects (Web rule actions delivered as rule_command, D-03): light
+// shows `colorName` (default red) and the buzzer sounds for a fixed 5 s, then
+// both expire on their own. `on == false` ends the effect early. Lower LED
+// priority than a manual light hold.
+void applyRuleLight(bool on, const char *colorName = nullptr);
+void applyRuleBuzzer(bool on);
+
+// Call every loop() iteration once Wi-Fi is up: expires holds and effects
+// (wrap-safe) and repaints the LED/buzzer when the composed state changed.
+void alertTick();
 
 // Status LED blue: WiFi connecting or reconnecting. Called from
 // wifi_manager.cpp.
