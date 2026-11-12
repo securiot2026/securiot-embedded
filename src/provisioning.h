@@ -27,6 +27,17 @@
 // Call once from wifiConnect().
 void provisioningBegin(bool force = false);
 
+// True once the portal was begun during this boot (provisioningBegin() went past
+// its decision), even before the library reports PORTAL_STARTED. Callers use it
+// to stop reconnecting while the portal owns the radio.
+bool provisioningStarted();
+
+// Erases the whole NVS namespace "securiot" (WiFi, Edge API URL, device key,
+// Device id, Zone id and the configured flag) and the portal library settings.
+// Used by the reset button. The caller restarts the board afterwards, the next
+// boot sees no complete config and opens the portal.
+void provisioningEraseConfig();
+
 // True whenever the AP/portal is up (AP_STARTED/PORTAL_STARTED), OR WiFi
 // has connected (STA) but /provision-extra has not yet been successfully
 // submitted. This is the single source of truth main.cpp's loop() uses to

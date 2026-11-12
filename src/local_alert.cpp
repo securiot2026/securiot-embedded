@@ -4,6 +4,8 @@
 #include <Arduino.h>
 
 #include "alert_state.h"
+#include "button_state.h"
+#include "led_pattern.h"
 
 namespace {
 
@@ -28,29 +30,51 @@ const uint8_t kBrightness = 40;
 Adafruit_NeoPixel g_pixel(kNumPixels, kRgbLedPin, NEO_GRB + NEO_KHZ800);
 
 AlertState g_state;
-Outputs g_last = {{0, 0, 0}, false};
-bool g_lastValid = false;
 
-void setPixelColor(uint8_t r, uint8_t g, uint8_t b) {
-    g_pixel.setPixelColor(0, g_pixel.Color(r, g, b));
+// What the device is doing, set by the indicate* functions below. CONNECTED
+// means "show the composed alert colors" (manual light, rule light, alert, idle).
+LedSystem g_system = LED_SYSTEM_CONNECTING;
+
+// Long-press overlay from reset_button.cpp, shown on top of every system state.
+ButtonPhase g_buttonPhase = BUTTON_PHASE_IDLE;
+uint32_t g_buttonHeldMs = 0;
+
+// Last values written to the hardware, so a call that changes nothing does not
+// repaint the pixel or rewrite the buzzer tone.
+Rgb g_lastLed = {0, 0, 0};
+bool g_lastLedValid = false;
+bool g_lastBuzzer = false;
+bool g_lastBuzzerValid = false;
+
+void paintPixel(const Rgb &c) {
+    g_pixel.setPixelColor(0, g_pixel.Color(c.r, c.g, c.b));
     g_pixel.show();
-    // A direct paint (Wi-Fi status, portal, fatal error) makes the cached
-    // outputs stale, so the next applyOutputs() must repaint.
-    g_lastValid = false;
 }
 
-// Single source of truth for what the LED and buzzer show: computeOutputs()
-// composes manual holds, rule effects, the generic alert and the idle color.
-// Hardware is only touched when the result changed (or `force` is set).
+// The only place that touches the pixel and the buzzer. computeOutputs()
+// composes manual holds, rule effects, the generic alert and the idle color,
+// ledPatternColor() puts the system state and the button overlay on top.
+// Hardware is only written when the result changed (or `force` is set).
 void applyOutputs(uint32_t nowMs, bool force) {
-    Outputs o = computeOutputs(g_state, nowMs);
-    if (!force && g_lastValid && o == g_last) {
-        return;
+    const Outputs o = computeOutputs(g_state, nowMs);
+
+    LedInput in;
+    in.system = g_system;
+    in.button = g_buttonPhase;
+    in.heldMs = g_buttonHeldMs;
+    in.composed = o.led;
+    const Rgb color = ledPatternColor(in, nowMs);
+
+    if (force || !g_lastLedValid || color != g_lastLed) {
+        paintPixel(color);
+        g_lastLed = color;
+        g_lastLedValid = true;
     }
-    setPixelColor(o.led.r, o.led.g, o.led.b);
-    ledcWriteTone(kBuzzerPin, o.buzzer ? kBuzzerToneHz : 0);
-    g_last = o;
-    g_lastValid = true;
+    if (force || !g_lastBuzzerValid || o.buzzer != g_lastBuzzer) {
+        ledcWriteTone(kBuzzerPin, o.buzzer ? kBuzzerToneHz : 0);
+        g_lastBuzzer = o.buzzer;
+        g_lastBuzzerValid = true;
+    }
 }
 
 } // namespace
@@ -58,12 +82,12 @@ void applyOutputs(uint32_t nowMs, bool force) {
 void alertInit() {
     g_pixel.begin();
     g_pixel.setBrightness(kBrightness);
-    indicateWifiConnecting();
 
     // The ESP32 Arduino core has no AVR-style tone()/noTone(), LEDC drives
-    // the buzzer directly.
+    // the buzzer directly. Attached before the first applyOutputs() writes it.
     ledcAttach(kBuzzerPin, kBuzzerToneHz, kBuzzerResolutionBits);
     ledcWriteTone(kBuzzerPin, 0);
+    indicateWifiConnecting();
 }
 
 void triggerLocalAlert() {
@@ -133,40 +157,35 @@ void alertTick() {
 }
 
 void indicateWifiConnecting() {
-    setPixelColor(0, 0, 255);
+    g_system = LED_SYSTEM_CONNECTING;
+    applyOutputs(millis(), false);
 }
 
 void indicateWifiConnected() {
     // Idle color is green; force the repaint so a held manual light is
     // reasserted after a Wi-Fi reconnect painted the status colors over it.
     g_state.idleColor = Rgb{0, 255, 0};
+    g_system = LED_SYSTEM_CONNECTED;
     applyOutputs(millis(), true);
 }
 
-void indicatePortalActive() {
-    // Non-blocking pulsing blue (0-1500ms rising, 1500-3000ms falling, no
-    // delay()): this function is called every loop() iteration while the
-    // portal is active, a blocking delay() here would stall
-    // espConnect.loop() and the non-blocking portal. Distinct from
-    // indicateWifiConnecting()'s solid blue.
-    const unsigned long kPeriodMs = 3000;
-    const uint8_t kMinBrightness = 20;
-    const uint8_t kMaxBrightness = 100;
+void indicatePortalActive(bool credentialsAccepted, int apClients) {
+    // Non-blocking, no delay(). Refreshed on every loop() iteration while the
+    // portal is active, which is what makes the pulse animate.
+    g_system = ledSystemForPortal(credentialsAccepted, apClients);
+    applyOutputs(millis(), false);
+}
 
-    unsigned long phase = millis() % kPeriodMs;
-    unsigned long halfPeriod = kPeriodMs / 2;
-    unsigned long triangle = (phase < halfPeriod) ? phase : (kPeriodMs - phase);
-    uint8_t brightness = kMinBrightness +
-                          (uint8_t)((triangle * (kMaxBrightness - kMinBrightness)) / halfPeriod);
-
-    setPixelColor(0, 0, brightness);
+void indicateButtonProgress(ButtonPhase phase, uint32_t heldMs) {
+    g_buttonPhase = phase;
+    g_buttonHeldMs = heldMs;
+    applyOutputs(millis(), false);
 }
 
 void indicateFatalError() {
+    g_system = LED_SYSTEM_FATAL;
     while (true) {
-        setPixelColor(255, 0, 0);
-        delay(300);
-        setPixelColor(0, 0, 0);
-        delay(300);
+        applyOutputs(millis(), false);
+        delay(10);
     }
 }

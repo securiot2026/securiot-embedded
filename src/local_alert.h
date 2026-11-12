@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "button_state.h"
+
 // Sets up the buzzer pin and the WS2812 status LED. Call once from
 // setup(), before WiFi connects, leaves the LED in the "connecting" color.
 void alertInit();
@@ -40,10 +42,12 @@ void applyRuleLight(bool on, const char *colorName = nullptr);
 void applyRuleBuzzer(bool on);
 
 // Call every loop() iteration once Wi-Fi is up: expires holds and effects
-// (wrap-safe) and repaints the LED/buzzer when the composed state changed.
+// (wrap-safe) and repaints the LED/buzzer when the composed state changed. It
+// also animates the status patterns (blink, pulse), so it is safe to call
+// inside blocking waits.
 void alertTick();
 
-// Status LED blue: WiFi connecting or reconnecting. Called from
+// Status LED slow blue blink: WiFi connecting or reconnecting. Called from
 // wifi_manager.cpp.
 void indicateWifiConnecting();
 
@@ -52,12 +56,19 @@ void indicateWifiConnecting();
 // by clearLocalAlert().
 void indicateWifiConnected();
 
-// Status LED pulsing blue: captive portal active (AP/portal phase, or
-// STA-connected-but-awaiting-/provision-extra phase). Distinct from the
-// solid blue of indicateWifiConnecting(). Non-blocking (no delay()) — call
-// every loop() iteration while provisioningActive() is true. Called from
-// provisioning.cpp.
-void indicatePortalActive();
+// Status LED for the captive portal: pulsing cyan while no phone joined the
+// SoftAP, solid cyan once a phone joined, pulsing yellow once the WiFi
+// credentials were accepted and /provision-extra is pending. Non-blocking (no
+// delay()): must be refreshed on every loop() iteration while the portal is
+// active, because the pulse only animates when this is called often. Called
+// from provisioning.cpp.
+void indicatePortalActive(bool credentialsAccepted, int apClients);
+
+// Long-press overlay of the reset button: magenta blink that speeds up while
+// the button is held, fast white blink once the reset is confirmed. Pass
+// BUTTON_PHASE_IDLE or BUTTON_PHASE_PRESSED to show the normal state again.
+// Called from reset_button.cpp on every poll.
+void indicateButtonProgress(ButtonPhase phase, uint32_t heldMs);
 
 // Status LED blinks red forever and never returns: fatal error (camera
 // init failed). Called once from main.cpp's setup(), replaces the halt

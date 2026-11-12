@@ -7,6 +7,7 @@
 #include <WiFi.h>
 
 #include "device_identity.h"
+#include "led_pattern.h"
 #include "local_alert.h"
 #include "portal_diag.h"
 #include "portal_prefill.h"
@@ -73,6 +74,12 @@ String g_capturedPassword;
 PortalPrefill g_prefill;
 
 bool started = false;
+
+// Phones currently joined to the SoftAP, for the status LED only (cyan pulse
+// versus solid cyan). Written from the WiFi event task, read from loop(), so it
+// is volatile. Floors at 0 and is reconciled with the real station count each
+// time the portal starts. It never drives a decision.
+volatile int g_apClients = 0;
 
 // Fixed SoftAP gateway IP MycilaESPConnect configures for every captive
 // portal it starts (WiFi.softAPConfig(IPAddress(4,3,2,1), ...) in the
@@ -352,10 +359,12 @@ void onPortalWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
         case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
             portalDiagFormatMacSuffix(info.wifi_ap_staconnected.mac, mac, sizeof(mac));
             Serial.printf("Portal WiFi: AP station connected mac=%s ap_clients=%u\n", mac, (unsigned)WiFi.softAPgetStationNum());
+            g_apClients = ledApClientsAfter(g_apClients, true);
             break;
         case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
             portalDiagFormatMacSuffix(info.wifi_ap_stadisconnected.mac, mac, sizeof(mac));
             Serial.printf("Portal WiFi: AP station disconnected mac=%s ap_clients=%u\n", mac, (unsigned)WiFi.softAPgetStationNum());
+            g_apClients = ledApClientsAfter(g_apClients, false);
             break;
         case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
             // The assigned address is deliberately not printed, only the fact.
@@ -475,7 +484,9 @@ void provisioningBegin(bool force) {
         switch (current) {
             case Mycila::ESPConnect::State::AP_STARTED:
             case Mycila::ESPConnect::State::PORTAL_STARTED:
-                indicatePortalActive();
+                // The loop refreshes the LED itself, this callback can run on
+                // another task. Only reconcile the client counter here.
+                g_apClients = (int)WiFi.softAPgetStationNum();
                 break;
             case Mycila::ESPConnect::State::PORTAL_COMPLETE: {
                 Mycila::ESPConnect::Config cfg = espConnect.getConfig();
@@ -561,6 +572,28 @@ void provisioningBegin(bool force) {
     espConnect.begin(apSsidWithMacSuffix().c_str(), "", portalConfig);
 }
 
+bool provisioningStarted() {
+    return started;
+}
+
+void provisioningEraseConfig() {
+    // Same namespace saveConfig() and the loader use. clear() drops every key
+    // of it (ssid, password, edgeApiUrl, deviceKey, deviceId, zoneId, configured).
+    const bool opened = prefs.begin(kPrefsNamespace, /*readOnly=*/false);
+    const bool cleared = opened && prefs.clear();
+    if (opened) {
+        prefs.end();
+    }
+    // The portal library keeps its own WiFi settings, wipe them regardless of
+    // the first result so a reset never leaves half of the config behind.
+    espConnect.clearConfiguration();
+    if (cleared) {
+        Serial.println("Provisioning: device config erased");
+    } else {
+        Serial.println("Provisioning: device config erase failed");
+    }
+}
+
 bool provisioningActive() {
     if (g_credentialsValidated) {
         // Still waiting on /provision-extra (or its Edge API ping retry)
@@ -578,6 +611,10 @@ void provisioningLoop() {
     // running after PORTAL_COMPLETE.
     if (started) {
         portalDiagnosticsTick();
+        // Refreshed on every iteration so the pulse really animates.
+        if (provisioningActive()) {
+            indicatePortalActive(g_credentialsValidated, g_apClients);
+        }
     }
     if (g_espConnectLoopPaused) {
         // AsyncWebServer and the DNS server are both event-driven, not

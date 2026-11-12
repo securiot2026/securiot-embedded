@@ -6,6 +6,7 @@
 #include "link_stability.h"
 #include "local_alert.h"
 #include "provisioning.h"
+#include "reset_button.h"
 
 namespace {
 
@@ -25,6 +26,10 @@ unsigned long g_lastReconnectAttemptMs = 0;
 // save off (and log it) on the rising edge only, once per link-up.
 bool g_linkWasUp = false;
 
+// Continuous WiFi loss while running. After LINK_LOSS_PORTAL_TIMEOUT_MS the
+// portal is reopened (see wifiEnsureConnected).
+LinkLossTracker g_lossTracker;
+
 void trackLink(bool up) {
     if (linkShouldApplyPowerSave(g_linkWasUp, up)) {
         wifiDisablePowerSave();
@@ -43,12 +48,20 @@ bool attemptStoredConnect(const String &ssid, const String &password) {
     Serial.println(ssid);
 
     unsigned long startMs = millis();
+    unsigned long lastDotMs = startMs;
     while (WiFi.status() != WL_CONNECTED) {
         if (millis() - startMs > kInitialConnectTimeoutMs) {
             return false;
         }
-        delay(250);
-        Serial.print(".");
+        // 10 ms slices: the button works and the slow blue blink animates for
+        // the whole connect phase. A long press never returns from here.
+        resetButtonPoll();
+        alertTick();
+        delay(10);
+        if (millis() - lastDotMs >= 250) {
+            lastDotMs = millis();
+            Serial.print(".");
+        }
     }
 
     Serial.println();
@@ -67,6 +80,7 @@ void waitForPortalConfig(String &ssid, String &password, String &edgeApiUrl, Str
     unsigned long lastCheckMs = millis();
     bool configured = false;
     while (!configured) {
+        resetButtonPoll();
         provisioningLoop();
         delay(10);
         if (millis() - lastCheckMs >= kPortalConfigRecheckIntervalMs) {
@@ -122,15 +136,33 @@ void wifiConnect() {
 }
 
 bool wifiEnsureConnected() {
+    if (provisioningStarted()) {
+        // The portal owns the radio. Reconnect attempts and the connecting
+        // blink would fight it, so stop here.
+        return false;
+    }
+
     if (WiFi.status() == WL_CONNECTED) {
         g_reconnectBackoffMs = kReconnectBackoffMinMs;
         trackLink(true);
+        linkLossTimedOut(g_lossTracker, true, millis(), LINK_LOSS_PORTAL_TIMEOUT_MS);
         return true;
     }
 
     // Records the drop so the next link-up re-applies power save and logs once.
     trackLink(false);
     indicateWifiConnecting();
+
+    const uint32_t lossNowMs = millis();
+    if (linkLossTimedOut(g_lossTracker, false, lossNowMs, LINK_LOSS_PORTAL_TIMEOUT_MS)) {
+        char lossLine[64];
+        linkFormatLossLog(lossLine, sizeof(lossLine), linkLossDownMs(g_lossTracker, lossNowMs));
+        Serial.println(lossLine);
+        // Never blocks, loop() keeps running and skips capture while the
+        // portal is active.
+        provisioningBegin(/*force=*/true);
+        return false;
+    }
 
     unsigned long now = millis();
     if (now - g_lastReconnectAttemptMs < g_reconnectBackoffMs) {

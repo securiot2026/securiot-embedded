@@ -10,6 +10,7 @@
 #include "link_stability.h"
 #include "local_alert.h"
 #include "provisioning.h"
+#include "reset_button.h"
 #include "secrets.h"
 #include "servo_control.h"
 #include "wifi_manager.h"
@@ -325,16 +326,20 @@ void setup() {
     Serial.begin(115200);
     Serial.println();
     Serial.println("SecurIoT ESP32-CAM firmware starting");
+    resetButtonInit();
 
 #if !CAMERA_PREVIEW_ONLY
     servosInit();
 #endif
     alertInit();
+    // A button held from power-on keeps counting while the board boots.
+    resetButtonPoll();
 
     if (!initCamera()) {
         Serial.println("FATAL: camera init failed, halting");
         indicateFatalError(); // blinks red forever, never returns
     }
+    resetButtonPoll();
 
     wifiConnect();
 
@@ -353,6 +358,8 @@ void setup() {
 }
 
 void loop() {
+    resetButtonPoll();
+
 #if !CAMERA_PREVIEW_ONLY
     // Non-blocking 50 Hz pan/tilt motion profile; cheap no-op between ticks.
     servoTick();
@@ -370,7 +377,7 @@ void loop() {
     if (!wifiEnsureConnected()) {
         // Not connected yet, backoff is handled inside wifi_manager, do not
         // block here, just skip this cycle and retry on the next loop().
-        delay(200);
+        resetButtonDelay(200);
         return;
     }
 

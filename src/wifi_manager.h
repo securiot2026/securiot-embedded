@@ -16,6 +16,10 @@ void wifiConnect();
 // iteration without blocking the caller for the full backoff duration.
 // PITFALLS.md Pitfall 2 requires this check on every loop iteration, not
 // only at boot, so a silent WiFi drop recovers without a manual power-cycle.
+// After about 2 minutes of continuous loss (LINK_LOSS_PORTAL_TIMEOUT_MS) the
+// setup portal is reopened without blocking and the device stays in
+// provisioning until the operator finishes it (the board restarts), resets it
+// with the button or power-cycles it.
 bool wifiEnsureConnected();
 
 // Switches WiFi power save off (WiFi.setSleep(false) plus an explicit
