@@ -9,6 +9,7 @@
 // can carry a URL, a key, a network name or a password.
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 
 // ---- Power save ------------------------------------------------------------
@@ -60,6 +61,49 @@ static inline int linkFormatPostFailLog(char *out, size_t outSize, int httpCode)
         return 0;
     }
     return snprintf(out, outSize, "HTTP POST failed: code=%d", httpCode);
+}
+
+// ---- Runtime WiFi loss -----------------------------------------------------
+//
+// About 2 minutes of continuous WiFi loss while the firmware runs, then it
+// reopens the setup portal instead of retrying forever.
+#define LINK_LOSS_PORTAL_TIMEOUT_MS 120000
+
+struct LinkLossTracker {
+    bool down = false;
+    uint32_t downSinceMs = 0;
+};
+
+// Feeds one link observation. Link up clears the state and returns false. The
+// first down observation starts the clock. Returns true once the unsigned
+// elapsed time since then is at least timeoutMs, and keeps returning true on
+// later calls (the caller latches the reopen).
+static inline bool linkLossTimedOut(LinkLossTracker &t, bool linkUp, uint32_t nowMs, uint32_t timeoutMs) {
+    if (linkUp) {
+        t.down = false;
+        t.downSinceMs = 0;
+        return false;
+    }
+    if (!t.down) {
+        t.down = true;
+        t.downSinceMs = nowMs;
+    }
+    return (uint32_t)(nowMs - t.downSinceMs) >= timeoutMs;
+}
+
+// Milliseconds the link has been down, 0 while it is up.
+static inline uint32_t linkLossDownMs(const LinkLossTracker &t, uint32_t nowMs) {
+    return t.down ? (uint32_t)(nowMs - t.downSinceMs) : 0;
+}
+
+// Writes `WiFi: link down for <s> s, reopening portal` with whole seconds
+// (rounded down). Numbers only, no string parameter. Same NULL and size
+// contract as the formatters above.
+static inline int linkFormatLossLog(char *out, size_t outSize, uint32_t downMs) {
+    if (out == NULL || outSize == 0) {
+        return 0;
+    }
+    return snprintf(out, outSize, "WiFi: link down for %lu s, reopening portal", (unsigned long)(downMs / 1000u));
 }
 
 #endif // LINK_STABILITY_H
