@@ -115,6 +115,7 @@ non-blocking, so they keep moving while the board works.
 | Red blink | Camera init failed | Check the camera ribbon and the serial log |
 | Magenta blink that speeds up | Button is being held | Keep holding until it turns white |
 | Fast white blink | Reset confirmed | Release the button and wait for the restart |
+| Solid orange | Firmware update over WiFi in progress | Do not cut the power, the board restarts by itself and turns green (see `docs/BRINGUP.md` section 3e) |
 
 Manual light commands and rule effects from the Web App still take priority
 over the idle colors, as before.

@@ -91,6 +91,7 @@ white flash:
 | Red (blinking, forever) | Fatal error (camera init failed) | `main.cpp` |
 | Magenta blink that speeds up | Reset button held, keep holding | `reset_button.cpp` |
 | Fast white blink | Reset confirmed, release the button | `reset_button.cpp` |
+| Solid orange | Firmware update over WiFi in progress | `ota_update.cpp` |
 
 The pattern comes from one pure function (`src/led_pattern.h`). The connected
 colors still follow the manual light, rule light, alert, idle order of

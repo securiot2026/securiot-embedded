@@ -168,6 +168,7 @@ Button rules:
 | Red blink | Camera init failed | Check the camera ribbon and read the Serial log |
 | Magenta blink that speeds up | Button held | Keep holding until the white blink |
 | Fast white blink | Reset confirmed | Release the button and wait for the restart |
+| Solid orange | Firmware update over WiFi in progress | Do not cut the power, the board restarts by itself and turns green |
 
 ## What this diagram does not cover
 

@@ -47,6 +47,9 @@ combination (see `.planning/research/PITFALLS.md` and the phase ROADMAP).
    the board from the external 5V supply set up in step 1, not from the
    USB-serial adapter, for normal operation.
 
+This first flash has to go over USB because it writes a new partition table.
+Later updates can go over WiFi, see section 3e.
+
 ## 3. Configuration
 
 WiFi, Edge API URL, device key, Device id and Zone id are not compiled into
@@ -191,6 +194,21 @@ firmware prints these line families:
   (also `reason=no_ssid`): the `AP mode` option of the WiFi page is not
   supported, leave it unchecked. The portal restarts and the phone must rejoin
   `SecurIoT-Setup-XXXX`.
+- `OTA: disabled, OTA_PASSWORD is not set in secrets.h`: printed once. OTA is off
+  because `OTA_PASSWORD` is missing or empty, and no update port is open.
+- `OTA: ready host=securiot-cam.local ip=<ip> port=3232`: the update service is
+  listening, printed once after the WiFi connects.
+- `OTA: update started`, then `OTA: progress N%` in steps of 10, then
+  `OTA: update finished, restarting`: one update from start to restart.
+- `OTA: error code=N (name)`: the update failed. The names are `auth`, `begin`,
+  `connect`, `receive` and `end`, see section 3e for what each one means.
+- `OTA: stopped, the setup portal is open`: the portal opened, so OTA is off
+  until the board restarts.
+- `Log mirror: listening on port 23`, `Log mirror: client connected` and
+  `Log mirror: client disconnected`: the state of the remote log, see section
+  3e.
+- `[log mirror: skipped N bytes]`: sent to a slow remote log client, N bytes of
+  history were overwritten before they could be delivered.
 
 Where it is stuck:
 
@@ -214,7 +232,7 @@ Where it is stuck:
 
 The log never prints the network name, the password, the device key, the Edge
 URL, query strings or form data. It only shows the last 3 bytes of a MAC
-address and the local STA IP.
+address and the local STA IP. The same holds for the OTA and log mirror lines.
 
 #### Network stability notes
 
@@ -283,6 +301,127 @@ white. Release it and the board restarts into the portal.
 - The setup access point is open, so anyone in range can use it while it is
   open. Do the setup in a private place and do not leave a device in the portal
   unattended.
+
+### 3e. OTA updates and the remote log
+
+Once the board is wired and running from the external supply there is no USB
+adapter on it. Two features cover that case: firmware updates over WiFi
+(ArduinoOTA) and a read-only copy of the log on TCP port 23. Both need the board
+connected to a normal home 2.4 GHz network.
+
+**Before the first flash.** Add this line to the untracked `src/secrets.h`, with
+a long random value made of letters and digits:
+
+```
+#define OTA_PASSWORD "..."
+```
+
+Without it OTA stays disabled and the board logs
+`OTA: disabled, OTA_PASSWORD is not set in secrets.h`. The optional
+`LOG_OVER_WIFI` macro defaults to 1, set it to 0 to remove the log server and
+its ring buffer. Both macros are documented in `src/secrets.h.example`.
+
+**The one-time USB flash.** The board default partition table has a single 3 MB
+app slot, so an update has nowhere to land. `platformio.ini` now selects
+`min_spiffs.csv` from the framework: two 1.875 MB app slots (app0 at 0x10000,
+app1 at 0x1F0000), nvs unchanged at 0x9000 with size 0x5000 and a small spiffs
+partition the firmware does not use. OTA cannot change a partition table, so
+this flash is a normal `pio run -t upload` over USB as in section 2. The
+firmware takes about 67.6 percent of one slot (1328980 of 1966080 bytes) and
+RAM use is 18.1 percent.
+
+The saved config should survive, because nvs keeps its place, but that is not
+guaranteed. If the board opens the setup portal after this flash (the
+`no complete config` line), provision it again through the portal or the Setup
+QR. While USB is still attached, note the board IP from the
+`WiFi: connected, IP=` or `OTA: ready` line and consider a DHCP reservation for
+it in the router.
+
+**Prove OTA once before removing USB.** Rebuild the same code, or with a trivial
+change, and run the OTA upload below while the adapter is still connected. If
+anything is wrong there is still a USB way back.
+
+**Updating over WiFi.** Export the same value you put in `OTA_PASSWORD`. Reading
+it with `read -s` keeps it out of the shell history:
+
+```
+read -s SECURIOT_OTA_PASSWORD
+export SECURIOT_OTA_PASSWORD
+pio run -e esp32cam_ota -t upload
+```
+
+Or in one go, `export SECURIOT_OTA_PASSWORD=...` followed by the same upload
+command. If `securiot-cam.local` does not resolve, use the board IP:
+
+```
+pio run -e esp32cam_ota -t upload --upload-port 192.168.1.37
+```
+
+Expect the espota progress in the terminal, the status LED solid orange during
+the transfer, then a restart and green again. The log shows the `OTA:` lines
+listed in section 3c. Password rules: no spaces or shell special characters, and
+the value must match `OTA_PASSWORD`. An unset variable gives an empty auth and
+the board refuses the upload. The computer must be on the same network, and its
+firewall must allow the espota listener (the board connects back to the
+computer on a TCP port).
+
+**Reading the log remotely.**
+
+```
+nc securiot-cam.local 23
+```
+
+or with the IP:
+
+```
+nc 192.168.1.37 23
+```
+
+- The log is read-only and anything you type is ignored.
+- One client at a time. A new connection replaces the old one, so a stale session
+  never locks you out.
+- About 2 KB (roughly 25 lines) of recent history arrives first, starting at a
+  full line, then live lines follow.
+- It works while the camera runs and also while the setup portal is open: join
+  `SecurIoT-Setup-XXXX` and use `nc 4.3.2.1 23`.
+- It carries the same lines as the USB Serial Monitor plus library error lines.
+- A slow client sees a `[log mirror: skipped N bytes]` marker instead of ever
+  slowing the firmware down. Ctrl+C ends the session.
+- When mDNS does not resolve, find the IP in the router client list (host name
+  `securiot-cam`), or on macOS run `dns-sd -B _arduino._tcp`.
+
+**When OTA runs.** Only while WiFi is connected and the setup portal has not
+been opened. If a runtime WiFi loss opens the portal, OTA stays off until the
+board restarts. During a transfer the capture cycle and the servos stand still
+(the servos keep their last position) and the reset button keeps working.
+
+**When OTA fails.**
+
+- Read the `OTA: error code=N (name)` line. `auth` means a wrong or missing
+  password. `connect` or `receive` means the network or the computer firewall.
+  `begin` means the image is too big or the board still has the old partition
+  table. `end` means a corrupt image.
+- Check that the LED is green and that the log shows `OTA: ready`, and that the
+  computer can resolve `securiot-cam.local` (or use the IP).
+- If the board is stuck, hold the GPIO12 button for 3 s to reopen the portal and
+  try again.
+- If a flashed image boot-loops or OTA is unreachable, only USB recovers it:
+  connect the adapter, bridge GPIO0 to GND and run `pio run -t upload` as in
+  section 2. There is no automatic rollback.
+
+**Security notes.**
+
+- Use this on a trusted private network only. Never forward port 23 or 3232 to
+  the Internet.
+- The log has no authentication. Anyone who can reach port 23 can read it,
+  including anyone who joins the open setup access point while the portal is
+  open. By design it carries no credentials (fixed text, numbers, ids, the local
+  IP and MAC suffixes), but treat it as internal.
+- OTA is protected by the password challenge, but the image travels unencrypted
+  and is not signed, so anyone who has the password can flash any firmware.
+- The password sits in the flash image as plain text and shows in the process
+  list of the uploading computer (and in the terminal with `pio run -v`).
+- The setup access point is open, see the note in section 3d.
 
 ## 4. Physical verification checklist
 
@@ -376,6 +515,23 @@ power:
 - [ ] A manual `door_lock` command is only reachable through a dry-run with
       execute true. Run one and confirm the door-lock servo sweeps to its
       locked position.
+- [ ] With `OTA_PASSWORD` empty or missing, the log shows
+      `OTA: disabled, OTA_PASSWORD is not set in secrets.h` once and the board
+      opens no OTA listener.
+- [ ] With a password set, the log shows `OTA: ready host=securiot-cam.local`
+      after the WiFi connects.
+- [ ] An OTA update from the `esp32cam_ota` env succeeds: the LED stays solid
+      orange during the transfer, then the board restarts and turns green.
+- [ ] An OTA upload with a wrong password is refused, the log shows
+      `OTA: error code=0 (auth)` and the board keeps running.
+- [ ] `nc securiot-cam.local 23` shows the recent history and then live lines
+      while the camera runs.
+- [ ] With the setup portal open, `nc 4.3.2.1 23` from a phone or laptop joined
+      to `SecurIoT-Setup-XXXX` shows the log too.
+- [ ] After the OTA and log changes, holding the GPIO12 button for 3 s with no
+      WiFi still erases the config and opens the portal.
+- [ ] The log, on the USB Serial Monitor and over `nc`, shows no network name,
+      key, URL or password.
 
 If any check fails, capture the Serial Monitor log at the time of failure,
 it is the most useful diagnostic for this firmware.
