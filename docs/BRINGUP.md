@@ -173,6 +173,20 @@ firmware prints these line families:
   portal`: at boot the device found no complete saved config, erased the
   leftover WiFi settings of the portal library and opened the portal, so enter
   the WiFi again.
+- `Button: GPIO12 ready, hold 3 s to erase the config and open the portal`:
+  printed at boot once the reset button is configured.
+- `Button: held at boot, keep holding 3 s to erase the config`: the button was
+  already pressed at power-on.
+- `Button: short press held_ms=N, no action`: a press shorter than 3 s,
+  nothing was changed.
+- `Button: long press confirmed held_ms=N, erasing config and restarting into
+  portal` (with `held at boot,` in front when it started at power-on): the 3 s
+  hold was reached.
+- `Provisioning: device config erased` (or `erase failed`) and then
+  `Button: config erased, release the button, restarting into the setup
+  portal`: the reset ran, the board restarts next.
+- `WiFi: link down for N s, reopening portal`: the WiFi stayed down for about
+  2 minutes while running, the portal opens and capture pauses.
 - `Provisioning: PORTAL_COMPLETE rejected reason=ap_mode, restarting portal`
   (also `reason=no_ssid`): the `AP mode` option of the WiFi page is not
   supported, leave it unchecked. The portal restarts and the phone must rejoin
@@ -248,6 +262,28 @@ address and the local STA IP.
 - The legacy `door_lock` manual command and the Edge rule `door_action: lock`
   stay as an alias of close.
 
+### 3d. Reset button and WiFi loss
+
+Reset into pairing mode: hold the button on GPIO12 for 3 s at any time, or hold
+it while powering on. The LED blinks magenta and speeds up, then blinks fast
+white. Release it and the board restarts into the portal.
+
+- The reset erases the saved config, including Device id and Zone id. Until the
+  device is provisioned again the compiled fallbacks from `secrets.h` apply.
+- After the restart the log shows the usual `no complete config` line and the
+  `SecurIoT-Setup-XXXX` portal opens.
+- With saved credentials the board first tries the WiFi for up to 3 x 20 s
+  (about 60 s of slow blue blink) and shows no portal in that time. The button
+  works during all of it, so hold it to skip the wait.
+- If the WiFi stays down for about 2 minutes while the device runs, the portal
+  opens and capture pauses. The portal does not reconnect the old WiFi on its
+  own, so the device stays in the portal until the operator finishes
+  provisioning (the board restarts), resets it with the button, or power-cycles
+  it.
+- The setup access point is open, so anyone in range can use it while it is
+  open. Do the setup in a private place and do not leave a device in the portal
+  unattended.
+
 ## 4. Physical verification checklist
 
 Perform these checks with the device on the external 5V supply, not on USB
@@ -257,9 +293,27 @@ power:
       and a new command mid-motion redirects smoothly.
 - [ ] Door: from the Mobile App send open and then close. Confirm the horn
       moves smoothly (about 2 s) and that rebooting the board does not move it.
-- [ ] Power on and confirm the status LED shows blue (WiFi connecting),
-      then turns green once connected. If it instead blinks red forever,
-      camera init failed, see the Serial Monitor for the error.
+- [ ] Power on and confirm the status LED shows a slow blue blink (WiFi
+      connecting), then turns green once connected. If it instead blinks red
+      forever, camera init failed, see the Serial Monitor for the error.
+- [ ] Button boot check: with the button wired to GPIO12 and GND and not
+      pressed, the board boots normally and the log shows
+      `Button: GPIO12 ready`. With the button held during power-on the board
+      still boots, the fast white blink appears after 3 s and then the portal
+      comes up.
+- [ ] A short press (under 3 s) only prints `Button: short press` and changes
+      nothing.
+- [ ] A long press (3 s) during the stored-credential connect phase erases the
+      config and the portal opens after the restart.
+- [ ] A long press while the portal is open erases the config and restarts the
+      portal.
+- [ ] LED sequence in the portal: pulsing cyan when it opens, solid cyan after
+      a phone joins, pulsing yellow after the WiFi step, green once the device
+      is online.
+- [ ] WiFi loss check: turn the router radio off for more than 2 minutes and
+      confirm the log shows `WiFi: link down for N s, reopening portal` and the
+      LED pulses cyan. Then provision the device, or power-cycle it, and
+      confirm it is back online and sending frames.
 - [ ] Open the Serial Monitor (`pio device monitor`, 115200 baud) and
       confirm the log shows a successful WiFi connect with an IP address.
 - [ ] Confirm the boot log shows the line `Identity: device_id=... zone_id=...`

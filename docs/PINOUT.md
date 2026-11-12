@@ -33,7 +33,6 @@ anything.
 |---|---|---|
 | 1 | UART0 TXD | Used by Serial/flashing, do not repurpose |
 | 3 | UART0 RXD | Used by Serial/flashing, do not repurpose |
-| 12 | MTDI / SD_DATA2 strapping pin | If pulled HIGH at boot the chip selects 1.8V flash I/O instead of 3.3V, which fails to boot this board's 3.3V flash. Never wired to a peripheral that could be high at power-on |
 | 16 | PSRAM | Used internally for PSRAM on this module's chip revision, not available as a general-purpose pin |
 
 ## Available GPIOs used by this project
@@ -44,11 +43,32 @@ anything.
 | 15 | Tilt servo | `src/servo_control.cpp` | Strapping pin for JTAG selection, but safe to drive as an output once boot has completed; not loaded externally during boot in this wiring |
 | 14 | Door-lock servo | `src/servo_control.cpp` | Safe general-purpose output |
 | 2 | Buzzer (LEDC tone) | `src/local_alert.cpp` | Strapping pin, must be LOW or floating during boot for normal boot mode; a servo motor or buzzer driver on this pin does not present a conflicting pull at power-on in this wiring, but confirm during Juan's physical bring-up (see docs/BRINGUP.md step 4) |
-| 4 | Status/alert RGB LED (WS2812, data pin) | `src/local_alert.cpp` | Same pin as the board's onboard flash LED, but driven as an external WS2812 data line instead: color-coded status (blue = WiFi connecting, green = idle/connected, red = alert or fatal error) instead of a plain white flash. See "Status LED (WS2812)" below |
+| 4 | Status/alert RGB LED (WS2812, data pin) | `src/local_alert.cpp` | Same pin as the board's onboard flash LED, but driven as an external WS2812 data line instead: color-coded status that shows the device step (connecting, portal, online, alert, fatal, button reset) instead of a plain white flash. See "Status LED (WS2812)" below |
+| 12 | Reset and pairing button (to GND, INPUT_PULLUP) | `src/reset_button.cpp` | MTDI strapping pin. A button between GPIO12 and GND holds it LOW, which is the safe level at power-on. See "GPIO12 reset button and the flash voltage strapping" below |
 
-GPIO 12 is deliberately left unused by this project because of its flash
-voltage-selection strapping role documented above, there was no need to
-risk it when GPIOs 13/14/15/2/4 already cover all five peripherals.
+### GPIO12 reset button and the flash voltage strapping
+
+GPIO12 (MTDI) is a strapping pin. The chip samples it at reset: LOW selects
+3.3V flash I/O, which is what this board needs, and HIGH selects 1.8V flash I/O
+and the board fails to boot. This is the reason the pin used to be listed as
+unused, and that earlier statement (never used, never wired) was removed on
+purpose.
+
+The reset button sits between GPIO12 and GND, so it only ever pulls the pin
+LOW. Pressing it, or holding it while the board powers on, is therefore safe,
+and that is exactly what the hold-during-boot reset relies on. The firmware
+enables the internal pull-up (`INPUT_PULLUP`) only after it starts, so nothing
+holds the pin HIGH at reset.
+
+Never add any of these on GPIO12, each one pulls the pin HIGH at reset and
+stops the board from booting:
+
+- an external pull-up resistor to 3.3V,
+- an active-high button wired to 3.3V,
+- a microSD card in the slot (GPIO12 is SD_DATA2 there), keep the slot empty.
+
+Behavior (details in `docs/WIRING.md`): a short press only logs, a hold of 3 s
+erases the saved config and restarts into the setup portal.
 
 ## Status LED (WS2812) on GPIO4
 
@@ -60,12 +80,21 @@ RGB LED (`Adafruit_NeoPixel`, `src/local_alert.cpp`), wired per
 onboard LED would have been, but color-coded status instead of a plain
 white flash:
 
-| Color | Meaning | Set from |
+| Pattern | Meaning | Set from |
 |---|---|---|
-| Blue | WiFi connecting or reconnecting | `wifi_manager.cpp` |
+| Slow blue blink | WiFi connecting or reconnecting (saved credentials) | `wifi_manager.cpp` |
+| Pulsing cyan | Setup portal open, no phone joined yet | `provisioning.cpp` |
+| Solid cyan | A phone joined the SecurIoT-Setup network | `provisioning.cpp` |
+| Pulsing yellow | WiFi credentials accepted, waiting for `/provision-extra` | `provisioning.cpp` |
 | Green | WiFi connected, idle (no active alert) | `wifi_manager.cpp`, `local_alert.cpp` |
 | Red (steady) | Confirmed detection / active alert | `local_alert.cpp` |
 | Red (blinking, forever) | Fatal error (camera init failed) | `main.cpp` |
+| Magenta blink that speeds up | Reset button held, keep holding | `reset_button.cpp` |
+| Fast white blink | Reset confirmed, release the button | `reset_button.cpp` |
+
+The pattern comes from one pure function (`src/led_pattern.h`). The connected
+colors still follow the manual light, rule light, alert, idle order of
+`src/alert_state.h`, and the two button patterns sit on top of every state.
 
 Tradeoff: it sits right next to the camera lens, so during the physical
 bring-up in `docs/BRINGUP.md`, verify the alert LED does not wash out the

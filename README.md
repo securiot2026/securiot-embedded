@@ -19,9 +19,12 @@ it does not initialize servos or send frames to the Edge API by itself.
    local buzzer/status LED accordingly.
 4. Reconnects to WiFi automatically if the connection drops, without a
    manual power-cycle.
-5. Drives a single WS2812 status LED (GPIO4, see `docs/PINOUT.md`): blue
-   while connecting to WiFi, green when idle/connected, red on a confirmed
-   detection, and red blinking forever if the camera fails to initialize.
+5. Drives a single WS2812 status LED (GPIO4, see `docs/PINOUT.md`) that shows
+   the exact step: slow blue blink while connecting, cyan and yellow patterns
+   in the setup portal, green when online, red on a confirmed detection, and
+   red blinking forever if the camera fails to initialize. A push button on
+   GPIO12 (to GND) held for 3 s erases the saved config and reopens the portal,
+   see `docs/PINOUT.md`.
 
 The exact request/response contract is documented in the Edge API's own
 README (`repos/securiot-edge-api/README.md`, "Camera detection contract").
@@ -111,7 +114,10 @@ src/camera_pins.h         AI-Thinker ESP32-CAM camera GPIO mapping
 src/camera_preview.{h,cpp} Opt-in local viewer, MJPEG, snapshots, and FPS
 src/wifi_manager.{h,cpp}  WiFi connect + reconnect-with-backoff
 src/servo_control.{h,cpp} Pan/tilt/door-lock servo control
-src/local_alert.{h,cpp}   Buzzer + WS2812 status LED (blue/green/red states)
+src/local_alert.{h,cpp}   Buzzer + WS2812 status LED (single paint path for all states)
+src/reset_button.{h,cpp}  GPIO12 reset and pairing button (3 s hold erases config)
+src/button_state.h        Pure debounce and long press state machine (host-tested)
+src/led_pattern.h         Pure state to LED color function (host-tested)
 src/edge_discovery.{h,cpp} mDNS lookup of the Edge API, with static fallback
 src/secrets.h.example     Template for WiFi/API credentials (copy to secrets.h)
 docs/PINOUT.md            GPIO reference
