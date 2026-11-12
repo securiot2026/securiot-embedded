@@ -70,6 +70,11 @@ void indicatePortalActive(bool credentialsAccepted, int apClients);
 // Called from reset_button.cpp on every poll.
 void indicateButtonProgress(ButtonPhase phase, uint32_t heldMs);
 
+// Status LED solid orange while an update over WiFi (ArduinoOTA) runs. Set from
+// ota_update.cpp, undone by indicateWifiConnected() when the update fails. The
+// button overlay still wins over it.
+void indicateOtaActive();
+
 // Status LED blinks red forever and never returns: fatal error (camera
 // init failed). Called once from main.cpp's setup(), replaces the halt
 // loop that used to follow a failed initCamera().

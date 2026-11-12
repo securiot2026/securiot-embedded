@@ -5,6 +5,7 @@
 #include "button_state.h"
 #include "local_alert.h"
 #include "provisioning.h"
+#include "log_mirror.h"
 
 namespace {
 

@@ -182,6 +182,11 @@ void indicateButtonProgress(ButtonPhase phase, uint32_t heldMs) {
     applyOutputs(millis(), false);
 }
 
+void indicateOtaActive() {
+    g_system = LED_SYSTEM_OTA;
+    applyOutputs(millis(), true);
+}
+
 void indicateFatalError() {
     g_system = LED_SYSTEM_FATAL;
     while (true) {

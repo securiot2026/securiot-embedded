@@ -14,6 +14,7 @@
 #include "provisioning_guard.h"
 #include "secrets.h"
 #include "wifi_manager.h"
+#include "log_mirror.h"
 
 // Compiled fallbacks, used only when NVS holds no valid portal-provided
 // identity (device provisioned before Phase 12). The legacy placeholders are

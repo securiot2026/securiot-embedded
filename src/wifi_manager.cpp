@@ -5,8 +5,10 @@
 
 #include "link_stability.h"
 #include "local_alert.h"
+#include "ota_update.h"
 #include "provisioning.h"
 #include "reset_button.h"
+#include "log_mirror.h"
 
 namespace {
 
@@ -44,8 +46,7 @@ bool attemptStoredConnect(const String &ssid, const String &password) {
     WiFi.begin(ssid.c_str(), password.c_str());
     indicateWifiConnecting();
 
-    Serial.print("WiFi: connecting to ");
-    Serial.println(ssid);
+    Serial.println("WiFi: connecting to the saved network");
 
     unsigned long startMs = millis();
     unsigned long lastDotMs = startMs;
@@ -57,6 +58,7 @@ bool attemptStoredConnect(const String &ssid, const String &password) {
         // the whole connect phase. A long press never returns from here.
         resetButtonPoll();
         alertTick();
+        remoteServicesPoll();
         delay(10);
         if (millis() - lastDotMs >= 250) {
             lastDotMs = millis();
@@ -82,6 +84,7 @@ void waitForPortalConfig(String &ssid, String &password, String &edgeApiUrl, Str
     while (!configured) {
         resetButtonPoll();
         provisioningLoop();
+        remoteServicesPoll();
         delay(10);
         if (millis() - lastCheckMs >= kPortalConfigRecheckIntervalMs) {
             lastCheckMs = millis();

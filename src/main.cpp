@@ -9,11 +9,13 @@
 #include "frame_response.h"
 #include "link_stability.h"
 #include "local_alert.h"
+#include "ota_update.h"
 #include "provisioning.h"
 #include "reset_button.h"
 #include "secrets.h"
 #include "servo_control.h"
 #include "wifi_manager.h"
+#include "log_mirror.h"
 
 #ifndef CAMERA_PREVIEW_ONLY
 #define CAMERA_PREVIEW_ONLY 0
@@ -359,6 +361,7 @@ void setup() {
 
 void loop() {
     resetButtonPoll();
+    remoteServicesPoll();
 
 #if !CAMERA_PREVIEW_ONLY
     // Non-blocking 50 Hz pan/tilt motion profile; cheap no-op between ticks.
