@@ -11,6 +11,9 @@
 // alert color. The overlay is the operator's own action, system states mean the
 // device is not online yet, and only the connected state defers to alert_state.h
 // so manual light, rule light, alert and idle keep their existing order.
+// The OTA system state (an update over WiFi is running) sits with the system
+// states: solid orange on purpose, there is no animation to maintain while
+// loop() is blocked by the synchronous update. The button overlay still wins.
 
 #include <stdint.h>
 
@@ -31,6 +34,9 @@ static const Rgb kLedYellow = {255, 255, 0};
 static const Rgb kLedRed = {255, 0, 0};
 static const Rgb kLedWhite = {255, 255, 255};
 static const Rgb kLedMagenta = {255, 0, 255};
+// A firmware update is running. Orange because red means alert and green means
+// online.
+static const Rgb kLedOrange = {255, 90, 0};
 static const Rgb kLedOff = {0, 0, 0};
 
 enum LedSystem {
@@ -39,7 +45,8 @@ enum LedSystem {
     LED_SYSTEM_PORTAL_READY,
     LED_SYSTEM_PORTAL_CLIENT,
     LED_SYSTEM_PORTAL_CREDENTIALS,
-    LED_SYSTEM_FATAL
+    LED_SYSTEM_FATAL,
+    LED_SYSTEM_OTA  // appended last so no existing value changes
 };
 
 struct LedInput {
@@ -136,6 +143,8 @@ static inline Rgb ledPatternColor(const LedInput &in, uint32_t nowMs) {
             return ledScale(kLedYellow, ledPulseLevel(nowMs, LED_PULSE_PERIOD_MS, LED_PULSE_MIN_LEVEL));
         case LED_SYSTEM_FATAL:
             return ledBlinkOn(nowMs, LED_BLINK_FATAL_PERIOD_MS) ? kLedRed : kLedOff;
+        case LED_SYSTEM_OTA:
+            return kLedOrange;
         case LED_SYSTEM_CONNECTED:
         default:
             return in.composed;

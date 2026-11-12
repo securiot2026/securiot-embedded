@@ -221,6 +221,38 @@ void test_ap_clients_after(void) {
     TEST_ASSERT_EQUAL_INT(1, ledApClientsAfter(-3, true));
 }
 
+// ---- OTA state -------------------------------------------------------------------
+
+void test_ota_is_solid_orange(void) {
+    const Rgb composed[] = {Rgb{0, 255, 0}, Rgb{255, 0, 0}, Rgb{255, 128, 0}};
+    for (size_t i = 0; i < sizeof(composed) / sizeof(composed[0]); i++) {
+        for (uint32_t t = 0; t <= 5950; t += 50) {
+            TEST_ASSERT_TRUE((colorFor(LED_SYSTEM_OTA, t, BUTTON_PHASE_IDLE, 0, composed[i]) == Rgb{255, 90, 0}));
+        }
+    }
+}
+
+void test_ota_button_overlay_still_wins(void) {
+    for (uint32_t t = 0; t <= 2000; t += 10) {
+        Rgb c = colorFor(LED_SYSTEM_OTA, t, BUTTON_PHASE_COUNTDOWN, 1000);
+        TEST_ASSERT_TRUE((c == Rgb{255, 0, 255}) || (c == kBlack));
+        Rgb d = colorFor(LED_SYSTEM_OTA, t, BUTTON_PHASE_CONFIRMED, 3000);
+        TEST_ASSERT_TRUE((d == Rgb{255, 255, 255}) || (d == kBlack));
+    }
+}
+
+void test_ota_is_distinguishable(void) {
+    const LedSystem others[] = {LED_SYSTEM_CONNECTING, LED_SYSTEM_PORTAL_READY, LED_SYSTEM_PORTAL_CLIENT,
+                                LED_SYSTEM_PORTAL_CREDENTIALS, LED_SYSTEM_FATAL, LED_SYSTEM_CONNECTED};
+    for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+        TEST_ASSERT_TRUE(sequence(LED_SYSTEM_OTA) != sequence(others[i]));
+    }
+    const Rgb named[] = {kLedBlue, kLedCyan, kLedYellow, kLedRed, kLedWhite, kLedMagenta, kLedOff};
+    for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); i++) {
+        TEST_ASSERT_TRUE(kLedOrange != named[i]);
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_blink_on);
@@ -237,5 +269,8 @@ int main(int, char **) {
     RUN_TEST(test_states_are_pairwise_distinguishable);
     RUN_TEST(test_system_for_portal_truth_table);
     RUN_TEST(test_ap_clients_after);
+    RUN_TEST(test_ota_is_solid_orange);
+    RUN_TEST(test_ota_button_overlay_still_wins);
+    RUN_TEST(test_ota_is_distinguishable);
     return UNITY_END();
 }
