@@ -39,6 +39,11 @@ namespace {
 
 unsigned long g_lastCaptureMs = 0;
 
+// False when the camera failed to initialize. The board keeps running without capture and retries.
+bool g_cameraReady = false;
+unsigned long g_lastCameraRetryMs = 0;
+const unsigned long kCameraRetryIntervalMs = 30000;
+
 // Edge API base URL and device key, sourced from Preferences via
 // provisioning.h (portal-managed, see provisioning.cpp) - re-read after a
 // run of consecutive request failures in case the operator re-provisioned
@@ -341,9 +346,13 @@ void setup() {
     // A button held from power-on keeps counting while the board boots.
     resetButtonPoll();
 
-    if (!initCamera()) {
-        Serial.println("FATAL: camera init failed, halting");
-        indicateFatalError(); // blinks red forever, never returns
+    // A missing or faulty camera must not take the board offline: the setup portal, OTA and the
+    // log mirror still have to come up so the board can be fixed without a USB cable. Capture
+    // stays off until a retry succeeds.
+    g_cameraReady = initCamera();
+    if (!g_cameraReady) {
+        Serial.println("Camera init failed, continuing without capture (will retry)");
+        g_lastCameraRetryMs = millis();
     }
     resetButtonPoll();
 
@@ -397,6 +406,16 @@ void loop() {
     delay(20);
 #else
     unsigned long now = millis();
+    if (!g_cameraReady) {
+        if (now - g_lastCameraRetryMs >= kCameraRetryIntervalMs) {
+            g_lastCameraRetryMs = now;
+            esp_camera_deinit();
+            g_cameraReady = initCamera();
+            Serial.println(g_cameraReady ? "Camera init recovered" : "Camera init failed again, will retry");
+        }
+        delay(10);
+        return;
+    }
     if (now - g_lastCaptureMs < CAPTURE_INTERVAL_MS) {
         // Short idle sleep so loop() iterates well above 50 Hz and servoTick()
         // honours its 20 ms tick.
