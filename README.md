@@ -145,7 +145,7 @@ non-blocking, so they keep moving while the board works.
 | Pulsing yellow | WiFi accepted, waiting for the second form | Fill the form and save |
 | Green | Online and idle | Nothing |
 | Red | Confirmed detection | It clears by itself |
-| Red blink | Camera init failed | Check the camera ribbon and the serial log |
+| No capture, portal still opens | Camera init failed | The board keeps running without capture and retries every 30 s. The log shows `Camera init failed`. Check the camera ribbon and the 5 V supply |
 | Magenta blink that speeds up | Button is being held | Keep holding until it turns white |
 | Fast white blink | Reset confirmed | Release the button and wait for the restart |
 | Solid orange | Firmware update over WiFi in progress | Do not cut the power, the board restarts by itself and turns green (see `docs/BRINGUP.md` section 3e) |

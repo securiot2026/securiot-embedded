@@ -122,3 +122,4 @@ or run the Edge API on faster hardware.
 | No frames reach the Edge after the laptop changed network | The board stores the Edge IP. Re-provision it with the Setup QR, or reserve a fixed IP for the Edge machine |
 | OTA says no response | Board offline, wrong IP, or firewall blocking UDP 3232. Ping the board first |
 | OTA says authentication failed | `SECURIOT_OTA_PASSWORD` differs from the password in the running firmware |
+| Board never opens the setup network | Older firmware halted when the camera failed to start, before the WiFi portal. Current firmware starts the portal anyway. If you still see no `SecurIoT-Setup-XXXX` network, open the serial monitor once (115200 baud) to read the boot log, check the camera ribbon and use a solid 5 V supply (a weak USB port browns out) |
