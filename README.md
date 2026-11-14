@@ -50,6 +50,39 @@ Setup on the Edge API side (setting the machine's mDNS hostname) is in
 `repos/securiot-edge-api/README.md`, "LAN discovery (mDNS)". Configuring
 this firmware's side of it is in `docs/BRINGUP.md`, step 3.
 
+## Bringing up a new Edge machine
+
+Use this when the Edge computer changes (new laptop, mini PC, new site) or has to be rebuilt. The board only talks to one Edge address, which it stores in flash, so moving the Edge always ends with re-pairing the board. The full Edge setup lives in the Edge repo, `securiot-edge-api/docs/LOCAL_DEPLOYMENT.md`, this section is the order of steps and the parts that touch the firmware and the cloud.
+
+1. **Prepare the machine.** Same LAN as the board, Python 3.12, and a fixed address (a DHCP reservation in the router). Clone `securiot-edge-api`, branch `develop`, create the virtual environment and install `requirements.txt` plus `onnxruntime`.
+2. **Download the models.** They are not in git. `LOCAL_DEPLOYMENT.md` lists the three files (`yolov8n.pt`, `yolov8n-face.pt`, `w600k_r50.onnx`), where to get them and the licence note for the ArcFace weights. Put them in `models/`.
+3. **Set the secrets on the Edge.** Four values must match the cloud, and none of them goes in git or in a chat:
+
+   | Edge setting | Must equal |
+   | --- | --- |
+   | `DEVICE_SHARED_SECRET` | Cloud API `EDGE_DEVICE_SHARED_SECRET` (the Setup QR hands it to the board as the device key) |
+   | `EDGE_ADMIN_API_KEY` | Cloud API `EDGE_ADMIN_API_KEY` (live feed, face enrollment and commands) |
+   | `CLOUD_API_URL` | The Cloud API base URL. Without it heartbeats go to `localhost:5000`, which is AirPlay on macOS and answers 403 |
+   | `CLOUD_DEVICE_API_KEY` | A fresh key from `POST /api/v1/devices/<id>/rotate-key` (owner JWT). The old key stops working at once |
+
+   Also set `DETECTION_BACKEND=yolo`, `FACE_RECOGNITION_ENABLED=true` and the model paths, as in `deploy/macos/edge.env.example`. Keep the file outside the repository.
+4. **Start it and check it alone.** Run the Edge on port 5001 (or install the launchd agent from `deploy/macos/`). `curl -i -X POST http://<edge-ip>:5001/frames` without a key must answer 401, which proves the server is up and checking keys.
+5. **Let the cloud reach it.** The Cloud API runs on a server that cannot see a private LAN address, so the live feed and face enrollment need a public address for the Edge, for example a Cloudflare tunnel (`LOCAL_DEPLOYMENT.md`, section 4). Save it as the device Edge URL in the Web App, or with `PATCH /api/v1/devices/<id>` and `{ "edgeUrl": "https://..." }`. If the zone uses Bot Fight Mode, allow the server address in the firewall rules, otherwise the Cloud API gets a 403.
+6. **Re-pair the board with the new Edge address.** There is no remote way to change it.
+   1. Hold the push button on GPIO12 for 3 seconds. The LED blinks magenta, then white, and the board restarts into the setup portal.
+   2. Join `SecurIoT-Setup-XXXX` from a phone, pick the WiFi and type its password yourself.
+   3. At `http://4.3.2.1/provision-extra`, scan the Setup QR from the Web App (Devices, Setup) or fill the four fields by hand: Edge URL, device key, device id and zone id.
+   4. Which Edge URL to enter: the board and the Edge share a LAN, so the LAN address `http://<edge-ip>:5001` is the fast path with no internet in between. The QR carries the device Edge URL from step 5 instead. Use the tunnel address only if you accept the frames going out and back through the internet. Type the LAN address by hand if you want the first option.
+   5. Save. The board checks the Edge, stores the config and restarts.
+7. **Verify end to end.**
+   - Remote log: `nc <board-ip> 23`. It should print `pan_delta=... tilt_delta=...` lines (and `faces count=N known=M` when face recognition is on). Repeated `Camera capture failed` means a camera or power problem, see `docs/DEVELOPMENT.md`.
+   - Edge log: `POST /frames` with 200 about every half second to a second. A 401 means the device key differs.
+   - Edge log: no `heartbeat: cloud API returned 403` lines. If it appears, fix `CLOUD_API_URL` or rotate the key again.
+   - Web App: the device shows online within about a minute and the live feed shows the latest frame.
+8. **Optional, face recognition.** Register each person from the Web App (at least 3 photos, with written consent, Peruvian law treats faces as sensitive data). The Edge log then shows `known=1` for them.
+
+Expect about 2 to 3 frames per second from a laptop, since each frame goes through YOLO, face detection and ArcFace on the CPU. The capture pace can be changed with `CAPTURE_INTERVAL_MS` (see `docs/DEVELOPMENT.md`). The capacity of a small mini PC has not been measured yet.
+
 ## First setup and pairing
 
 A fresh board has no WiFi and no Edge API address, so it opens its own setup
