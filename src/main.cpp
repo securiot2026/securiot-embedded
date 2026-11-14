@@ -29,8 +29,11 @@
 #define CAPTURE_FRAME_WIDTH 640
 #define CAPTURE_FRAME_HEIGHT 480
 
-// Minimum time between capture/POST cycles.
-#define CAPTURE_INTERVAL_MS 2000
+// Minimum time between capture/POST cycles. The real pace is set by the Edge
+// (YOLO plus ArcFace per frame), the POST is synchronous, so this only caps it.
+#ifndef CAPTURE_INTERVAL_MS
+#define CAPTURE_INTERVAL_MS 100
+#endif
 
 namespace {
 
@@ -91,12 +94,10 @@ bool initCamera() {
     // ESP32-CAM, see docs/PINOUT.md.
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-#if CAMERA_PREVIEW_ONLY
-    // Two JPEG buffers allow capture and transmission to overlap. Discard
-    // stale queued frames instead of adding latency when Wi-Fi slows down.
+    // Two JPEG buffers let the sensor keep capturing while a frame uploads.
+    // Discard stale queued frames so tracking always sees the latest image.
     config.fb_count = 2;
     config.grab_mode = CAMERA_GRAB_LATEST;
-#endif
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
