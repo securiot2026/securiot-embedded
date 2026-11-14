@@ -198,6 +198,7 @@ network and never forward its port to the Internet. Set the flag back to
 - [`docs/WIRING.md`](docs/WIRING.md) - visual connection diagram: every
   external component (servos, buzzer, power supply, FTDI programmer), what
   GPIO/pin it wires to, and the wiring order.
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) - GitFlow, CI, OTA flashing, LEDC timer rules, capture rate.
 - [`docs/BRINGUP.md`](docs/BRINGUP.md) - manual checklist for flashing,
   configuring, and physically verifying the device.
 
