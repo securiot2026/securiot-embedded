@@ -28,12 +28,12 @@ uint32_t g_lastTickMs = 0;
 } // namespace
 
 void servosInit() {
-    // Allocate all 4 LEDC timers before attaching, per ESP32Servo's own
-    // Sweep example, then attach each servo at the standard 50 Hz period.
+    // Allocate LEDC timers 0 to 2 only. Timer 3 is reserved for the camera
+    // XCLK (see main.cpp); letting the servos reconfigure it to 50 Hz stops
+    // the camera and every capture fails afterwards.
     ESP32PWM::allocateTimer(0);
     ESP32PWM::allocateTimer(1);
     ESP32PWM::allocateTimer(2);
-    ESP32PWM::allocateTimer(3);
 
     g_panServo.setPeriodHertz(50);
     g_tiltServo.setPeriodHertz(50);

@@ -76,8 +76,11 @@ bool initCamera() {
     config.pin_pclk = PCLK_GPIO_NUM;
 
     config.xclk_freq_hz = 20000000;
-    config.ledc_timer = LEDC_TIMER_0;
-    config.ledc_channel = LEDC_CHANNEL_0;
+    // Camera XCLK lives on the last LEDC timer/channel pair (timer 3, channel 7)
+    // so the buzzer and the three servos, which the Arduino core and ESP32Servo
+    // hand out from channel 0 upward, never retune the 20 MHz camera clock.
+    config.ledc_timer = LEDC_TIMER_3;
+    config.ledc_channel = LEDC_CHANNEL_7;
 
     config.pixel_format = PIXFORMAT_JPEG;
     config.frame_size = CAPTURE_FRAME_SIZE;
