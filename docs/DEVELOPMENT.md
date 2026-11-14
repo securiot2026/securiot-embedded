@@ -32,6 +32,27 @@ plan, so nobody enforces the CI check for you. Wait for it by hand.
 
 Run the same two commands locally before you open a pull request.
 
+## Releases
+
+`.github/workflows/release.yml` runs when a tag that starts with `v` is pushed. It runs the host tests, builds `esp32cam` with a copy of `secrets.h.example`, and creates a GitHub Release with `firmware.bin`, `partitions.bin`, `bootloader.bin` and `SHA256SUMS.txt`. The build in the release holds no real credentials, so it is for review and for flashing machines that then provision through the setup portal.
+
+Secrets used: none beyond the automatic `GITHUB_TOKEN`.
+
+To cut a release:
+
+1. Merge the work into `develop`, then merge `develop` into `main` through a pull request, with CI green.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```bash
+   git checkout main && git pull
+   git tag -a v1.2.0 -m "Firmware 1.2.0"
+   git push origin v1.2.0
+   ```
+
+3. Wait for the Release workflow, then check the files and `SHA256SUMS.txt` on the Release page (`sha256sum -c SHA256SUMS.txt`).
+
+CI never flashes a camera. OTA still needs `OTA_PASSWORD` and a machine on the same LAN as the device, so run the OTA upload from your own computer with the downloaded `firmware.bin`. A change to the partition table always needs a USB flash.
+
 ## Secrets
 
 `src/secrets.h` is ignored by git. Copy `src/secrets.h.example` and fill it in.
